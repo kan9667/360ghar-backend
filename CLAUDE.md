@@ -16,8 +16,8 @@ pip install -r requirements.txt
 # Set up environment (copy and edit .env.example to .env)
 cp .env.example .env
 
-# Setup database and run migrations
-alembic upgrade head
+# Database is managed through Supabase migrations
+# See supabase/migrations/ for schema definitions
 ```
 
 ### Running the Application
@@ -44,42 +44,46 @@ docker-compose up db redis
 
 ### Testing and Quality Assurance
 ```bash
-# Currently no specific test framework is configured
-# When adding tests, typically use pytest:
-# pip install pytest pytest-asyncio httpx
-# pytest tests/
+# Run tests using pytest (already included in requirements.txt)
+pytest tests/
+
+# Run specific test file
+pytest tests/test_specific_file.py
+
+# Run tests with verbose output
+pytest -v tests/
+
+# Run load testing for API endpoints
+python tests/load_test_properties.py
 
 # No specific linting configuration found
-# Consider adding flake8, black, or ruff for code formatting:
-# pip install ruff black
-# ruff check app/
-# black app/
+# For code formatting, add ruff or black:
+pip install ruff black
+ruff check app/
+black app/
 ```
 
 ### Database Operations
 ```bash
-# Create new migration
-alembic revision --autogenerate -m "Description"
-
-# Apply migrations
-alembic upgrade head
-
-# Check migration history
-alembic history
-
-# Rollback migration
-alembic downgrade -1
+# Database migrations are managed through Supabase
+# See supabase/migrations/ directory for SQL migration files
+# Migrations are applied through Supabase CLI or dashboard
 
 # Check application health (includes database connection test)
 curl http://localhost:8000/health
+
+# Test database connectivity through Supabase
+# Use Supabase dashboard or API for database operations
 ```
 
 ### Data Management
 ```bash
 # Load comprehensive sample data (recommended)
+# Creates 100 properties per location (San Francisco, Mumbai, Gurgaon = 300 total)
 python populate_data/load_comprehensive_data.py
 
 # Quick data loading for development
+# Creates ~17 properties per location (51 total)
 python populate_data/load_comprehensive_data.py --quick
 
 # Clear all existing data before loading
@@ -110,14 +114,10 @@ PYTHONPATH=/Users/sakshammittal/Documents/360ghar/backend python populate_data/l
 ### Core Components
 
 #### Database Layer (`app/models/`)
-- **SQLAlchemy models** with async support and PostGIS extensions
+- **SQLAlchemy models** with async support (`models.py`, `enums.py`)
 - **Optimized indexes** for swipe queries and location searches
 - **Relationship mappings** for efficient data loading
-
-#### Repository Layer (`app/repositories/`)
-- **Repository Pattern** - Database access abstraction layer
-- **Base repository** with common CRUD operations
-- **Specialized repositories** for complex domain queries
+- **Direct SQLAlchemy access** - Services interact directly with models (no repository layer)
 
 #### API Layer (`app/api/`)
 - **Versioned APIs** under `/api/v1/` for backward compatibility
@@ -128,6 +128,9 @@ PYTHONPATH=/Users/sakshammittal/Documents/360ghar/backend python populate_data/l
 - **Property Discovery Algorithm** in `swipe.py` - implements recommendation logic
 - **Geospatial Services** in `property.py` - radius search and distance calculations
 - **Booking Management** - handles availability and scheduling conflicts
+- **Agent Management** in `agent.py` - manages 360Ghar employee agents who assist users
+- **Storage Services** in `storage.py` - file upload and management
+- **Direct database operations** - Services use SQLAlchemy models directly
 
 #### Data Validation (`app/schemas/`)
 - **Request/Response models** with strict validation
@@ -138,7 +141,7 @@ PYTHONPATH=/Users/sakshammittal/Documents/360ghar/backend python populate_data/l
 
 #### Authentication Flow with Supabase
 1. **User Registration/Login**: Frontend calls Supabase Auth directly
-2. **Token Validation**: Backend validates Supabase JWT in `app/core/security.py:get_current_user`
+2. **Token Validation**: Backend validates Supabase JWT in `app/core/auth.py:get_current_user`
 3. **User Sync**: `app/api/api_v1/endpoints/auth.py` syncs Supabase users with local database
 4. **Protected Routes**: Use `Depends(get_current_user)` for authentication
 
@@ -153,6 +156,13 @@ PYTHONPATH=/Users/sakshammittal/Documents/360ghar/backend python populate_data/l
 2. **Distance Queries**: `ST_DWithin` for radius search, `ST_Distance` for sorting
 3. **Performance**: Spatial indexes on location columns for fast queries
 4. **Coordinate System**: Uses WGS84 (SRID 4326) for GPS compatibility
+
+#### Agent System Architecture
+1. **360Ghar Employee Agents**: All agents are 360Ghar.com employees who assist users in finding their perfect home
+2. **Auto-Assignment**: Users are automatically assigned an agent when they first access agent details
+3. **Load Balancing**: Agent assignment uses round-robin based on current user load and availability
+4. **Visit Coordination**: Agents handle property visit scheduling and coordinate with users throughout the process
+5. **Persistent Relationships**: Each user maintains a consistent agent relationship for personalized service
 
 ## Development Guidelines
 
@@ -182,14 +192,25 @@ This project follows strict coding conventions as defined in `.rules/codingrules
 ### Critical Development Patterns
 
 #### Async Database Operations
-All database operations MUST use async patterns:
+All database operations MUST use async patterns with direct model access:
 ```python
-# Correct
+# Correct - Using SQLAlchemy 2.0 style with direct models
+from app.models.models import Property
+from sqlalchemy import select
+
 async def get_property(db: AsyncSession, property_id: int):
     result = await db.execute(select(Property).where(Property.id == property_id))
     return result.scalar_one_or_none()
 
-# Wrong - will cause errors
+# Also correct - For simple operations
+async def create_property(db: AsyncSession, property_data: dict):
+    property = Property(**property_data)
+    db.add(property)
+    await db.commit()
+    await db.refresh(property)
+    return property
+
+# Wrong - Old SQLAlchemy 1.x style
 def get_property(db: AsyncSession, property_id: int):
     return db.query(Property).filter(Property.id == property_id).first()
 ```
@@ -253,9 +274,10 @@ raise HTTPException(
 
 ### Configuration and Core
 - `app/core/config.py` - Application settings and environment variables
-- `app/core/database.py` - Database connection and session management  
-- `app/core/security.py` - Authentication and JWT token handling
-- `app/core/supabase_client.py` - Supabase client configuration
+- `app/core/auth.py` - Authentication and JWT token handling with Supabase
+- `app/core/database.py` - Database connection and session management
+- `app/core/logging.py` - Centralized logging configuration
+- `app/db/types.py` - Custom database types and configurations
 
 ### Entry Points and Routing
 - `app/main.py` - FastAPI application factory with CORS, exception handling, and health endpoints
@@ -265,29 +287,27 @@ raise HTTPException(
 ### Middleware (`app/middleware/`)
 - `rate_limit.py` - API rate limiting and throttling
 - `security.py` - Security middleware for request validation
+- `exception_handler.py` - Centralized exception handling
 
-### Data Models (app/models/)
-- `user.py` - User profiles, authentication, and preferences
-- `property.py` - Property listings with geospatial data
-- `booking.py` - Short-stay booking management
-- `visit.py` - Property visit scheduling
-- `user_interaction.py` - Swipes, favorites, search history
+### Database Schema (supabase/migrations/)
+- Schema is defined in SQL migration files in `supabase/migrations/`
+- `20250817120000_complete_schema.sql` - Current complete database schema
+- `20250817000002_add_amenities_structure.sql` - Amenities and property features
+- Migration files manage table structure, indexes, and constraints
 
 ### Business Logic (app/services/)
 - `property.py` - Property search algorithms and geospatial operations
 - `swipe.py` - Swipe recommendation engine and deduplication logic
 - `booking.py` - Booking availability and pricing calculations
 - `user.py` - User management and preference learning
-- `visit.py` - Visit scheduling and relationship manager assignment
-- `analytics.py` - Usage tracking and analytics
+- `visit.py` - Visit scheduling and agent assignment
+- `agent.py` - 360Ghar employee agent management and assignment logic
+- `storage.py` - File upload and storage management
 
-### Data Access Layer (app/repositories/)
-- `base.py` - Common CRUD operations and base repository pattern
-- `property.py` - Complex property queries and geospatial operations
-- `user.py` - User data access and preference management
-- `booking.py` - Booking-related database operations
-- `visit.py` - Visit scheduling and relationship manager queries
-- `user_interaction.py` - Swipe and interaction data operations
+### Database Models (app/models/)
+- `models.py` - All SQLAlchemy model definitions with relationships
+- `enums.py` - Enum definitions for property types, statuses, etc.
+- Models include: User, Property, Agent, Booking, Visit, UserSwipe, Amenity
 
 ### API Endpoints (app/api/api_v1/endpoints/)
 - `auth.py` - Authentication, user sync with Supabase
@@ -296,10 +316,13 @@ raise HTTPException(
 - `visits.py` - Visit scheduling and management
 - `bookings.py` - Short-stay booking system
 - `users.py` - User profile and preference management
+- `agents.py` - 360Ghar employee agent assignment and management
 - `analytics.py` - Usage analytics and insights
 
 ### Schema Validation (app/schemas/)
 - Pydantic models for request/response validation following the pattern: `EntityBase`, `EntityCreate`, `EntityUpdate`, `EntityInDB`, `Entity`
+- Includes schemas for: User, Property, Agent, Booking, Visit, Amenity
+- JSON validation and serialization for API contracts
 
 ## Environment Variables
 
@@ -324,13 +347,12 @@ REDIS_URL=redis://localhost:6379
 ## Key Architectural Patterns
 
 ### Layered Architecture
-The application follows a strict layered architecture pattern:
+The application follows a simplified layered architecture pattern:
 - **API Layer** (`app/api/`): FastAPI endpoints with dependency injection
 - **Schema Layer** (`app/schemas/`): Pydantic validation and serialization  
-- **Service Layer** (`app/services/`): Business logic and algorithms
-- **Repository Layer** (`app/repositories/`): Database access abstraction
+- **Service Layer** (`app/services/`): Business logic with direct model access
 - **Model Layer** (`app/models/`): SQLAlchemy ORM with relationships
-- **Database Layer**: PostgreSQL + PostGIS + Redis
+- **Database Layer**: PostgreSQL + PostGIS managed through Supabase
 
 ### Key Business Workflows
 Based on `.rules/userworkflow.md`, the platform supports three core user experiences:
@@ -342,23 +364,24 @@ Based on `.rules/userworkflow.md`, the platform supports three core user experie
 - **Recommendation Engine**: Learns from user swipes and preferences for personalized property suggestions
 - **Geospatial Search**: PostGIS-powered location queries with radius filtering and distance calculations
 - **Swipe Deduplication**: Prevents duplicate swipes and maintains user interaction history
-- **Visit Scheduling**: Round-robin relationship manager assignment with conflict resolution
+- **Agent Assignment System**: Automatic assignment of 360Ghar employee agents to users for personalized assistance
+- **Visit Scheduling**: Agent-based visit coordination with load balancing and conflict resolution
 - **Booking System**: Real-time availability checking with overbooking prevention
 
 ## Common Development Tasks
 
 ### Adding New Endpoints
-1. Create route handler in appropriate `app/api/api_v1/endpoints/` file
-2. Add request/response schemas in `app/schemas/` following the Entity pattern
-3. Implement business logic in `app/services/`
-4. Add database models if needed in `app/models/`
+1. Add database models in `app/models/models.py` and enums in `app/models/enums.py` if needed
+2. Create request/response schemas in `app/schemas/` following the Entity pattern
+3. Implement business logic in `app/services/` using direct model access
+4. Create route handler in appropriate `app/api/api_v1/endpoints/` file
 5. Update `app/api/api_v1/api.py` to include new router
 
 ### Database Schema Changes
-1. Modify models in `app/models/`
-2. Generate migration: `alembic revision --autogenerate -m "Description"`
-3. Review generated migration file in `alembic/versions/`
-4. Apply migration: `alembic upgrade head`
+1. Create new SQL migration file in `supabase/migrations/`
+2. Use timestamped filename: `YYYYMMDDHHMMSS_description.sql`
+3. Apply migration through Supabase CLI: `supabase db push`
+4. Update model files in `app/models/` to match new schema
 5. Test with sample data: `python populate_data/load_comprehensive_data.py --quick`
 
 ### Working with Geospatial Data
@@ -398,13 +421,15 @@ psql $DATABASE_URL
 CREATE EXTENSION IF NOT EXISTS postgis;
 ```
 
-### Alembic Migration Conflicts
-If migrations fail due to existing tables:
+### Supabase Migration Issues
+If migrations fail:
 ```bash
-# Check current revision
-alembic current
-# Stamp database with specific revision
-alembic stamp head
+# Check migration status
+supabase status
+# Reset local database
+supabase db reset
+# Apply migrations
+supabase db push
 ```
 
 ### Supabase Auth Token Issues

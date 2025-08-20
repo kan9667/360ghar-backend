@@ -1,62 +1,30 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import datetime
-from app.models.visit import VisitStatus
-
-class RelationshipManagerBase(BaseModel):
-    name: str
-    email: EmailStr
-    phone: str
-    whatsapp_number: Optional[str] = None
-    profile_image_url: Optional[str] = None
-    bio: Optional[str] = None
-
-class RelationshipManagerCreate(RelationshipManagerBase):
-    employee_id: str
-    department: str = "Customer Relations"
-    experience_years: Optional[int] = None
-    working_hours: Optional[str] = None
-
-class RelationshipManager(RelationshipManagerBase):
-    id: int
-    employee_id: str
-    department: str
-    experience_years: Optional[int] = None
-    is_active: bool
-    working_hours: Optional[str] = None
-    total_visits_handled: int
-    customer_rating: Optional[str] = None
-    
-    class Config:
-        from_attributes = True
+from app.models.enums import VisitStatus
+from app.schemas.property import Property as PropertySchema
 
 class VisitBase(BaseModel):
     property_id: int
     scheduled_date: datetime
-    visitor_name: str
-    visitor_phone: str
-    visitor_email: Optional[EmailStr] = None
-    number_of_visitors: int = 1
-    preferred_time_slot: Optional[str] = None
     special_requirements: Optional[str] = None
 
-class VisitCreate(VisitBase):
-    pass
+class VisitCreate(BaseModel):
+    property_id: int
+    scheduled_date: datetime
+    user_id: Optional[int] = None
+    special_requirements: Optional[str] = None
 
 class VisitUpdate(BaseModel):
     scheduled_date: Optional[datetime] = None
     status: Optional[VisitStatus] = None
-    visitor_name: Optional[str] = None
-    visitor_phone: Optional[str] = None
-    visitor_email: Optional[EmailStr] = None
-    number_of_visitors: Optional[int] = None
-    preferred_time_slot: Optional[str] = None
     special_requirements: Optional[str] = None
     visit_notes: Optional[str] = None
     visitor_feedback: Optional[str] = None
     interest_level: Optional[str] = None
     follow_up_required: Optional[bool] = None
     follow_up_date: Optional[datetime] = None
+    cancellation_reason: Optional[str] = None
 
 class VisitReschedule(BaseModel):
     visit_id: int
@@ -70,7 +38,7 @@ class VisitCancel(BaseModel):
 class Visit(VisitBase):
     id: int
     user_id: int
-    relationship_manager_id: Optional[int] = None
+    agent_id: Optional[int] = None
     actual_date: Optional[datetime] = None
     status: VisitStatus
     visit_notes: Optional[str] = None
@@ -82,9 +50,7 @@ class Visit(VisitBase):
     rescheduled_from: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
-    
-    # Relationships
-    relationship_manager: Optional[RelationshipManager] = None
+    property: Optional[PropertySchema] = None
     
     class Config:
         from_attributes = True
@@ -95,3 +61,4 @@ class VisitList(BaseModel):
     upcoming: int
     completed: int
     cancelled: int
+

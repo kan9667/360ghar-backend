@@ -1,56 +1,58 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
-from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import verify_supabase_token
-from app.core.supabase_client import get_supabase_client, get_supabase_admin_client
+from app.core.auth import get_supabase_auth_client, verify_supabase_token
+from app.core.logging import get_logger
+from app.schemas.user import UserCreate, UserLogin, User as UserSchema
+from app.services.user import get_or_create_user_from_supabase
 import anyio
-from app.models.user import User
-from app.schemas.user import UserCreate, Token, User as UserSchema, UserLogin
-from app.services.user import get_user_by_email, get_or_create_user_from_supabase, get_user_by_supabase_id
+from typing import Optional
 
 router = APIRouter()
+logger = get_logger(__name__)
 
-async def get_current_user(authorization: str = Header(None), db: AsyncSession = Depends(get_db)):
-    """Get current user from Supabase JWT token"""
+async def get_current_user(
+    authorization: str = Header(None),
+    db: AsyncSession = Depends(get_db)
+) -> UserSchema:
+    """Get current user from token"""
     if not authorization:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header missing"
-        )
+        logger.debug("Authorization header missing")
+        raise HTTPException(status_code=401, detail="Authorization header missing")
     
-    # Extract token from "Bearer <token>" format
     try:
         scheme, token = authorization.split()
         if scheme.lower() != "bearer":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication scheme"
-            )
+            logger.warning("Invalid authentication scheme")
+            raise HTTPException(status_code=401, detail="Invalid authentication scheme")
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authorization header format"
-        )
+        logger.warning("Invalid authorization header format")
+        raise HTTPException(status_code=401, detail="Invalid authorization header format")
     
-    # Verify token with Supabase
-    supabase_user_data = await verify_supabase_token(token)
-    if not supabase_user_data:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token"
-        )
-    
-    # Get or create user in our database
-    db_user = await get_or_create_user_from_supabase(db, supabase_user_data)
-    return db_user
+    try:
+        supabase_user_data = await verify_supabase_token(token)
+        if not supabase_user_data:
+            logger.warning("Invalid or expired token")
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        
+        db_user = await get_or_create_user_from_supabase(db, supabase_user_data)
+        logger.debug(f"User authenticated successfully: {db_user.id}")
+        return db_user
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Authentication error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+async def get_current_active_user(current_user: UserSchema = Depends(get_current_user)) -> UserSchema:
+    if not current_user.is_active:
+        raise HTTPException(status_code=400, detail="Inactive user")
+    return current_user
 
 async def get_current_user_optional(
-    authorization: str = Header(None), 
+    authorization: str = Header(None),
     db: AsyncSession = Depends(get_db)
-) -> Optional[User]:
-    """Get current user if token is provided, otherwise return None"""
+) -> Optional[UserSchema]:
     if not authorization:
         return None
     
@@ -58,76 +60,71 @@ async def get_current_user_optional(
         scheme, token = authorization.split()
         if scheme.lower() != "bearer":
             return None
-    except ValueError:
-        return None
+        
+        supabase_user_data = await verify_supabase_token(token)
+        if supabase_user_data:
+            return await get_or_create_user_from_supabase(db, supabase_user_data)
+    except Exception:
+        pass
     
-    supabase_user_data = await verify_supabase_token(token)
-    if not supabase_user_data:
-        return None
-    
-    db_user = await get_or_create_user_from_supabase(db, supabase_user_data)
-    return db_user
-
-async def get_current_active_user(current_user: User = Depends(get_current_user)):
-    if not current_user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user")
-    return current_user
-
-@router.get("/me", response_model=UserSchema)
-async def read_users_me(current_user: User = Depends(get_current_active_user)):
-    """Get current user profile - requires valid Supabase token"""
-    return current_user
-
-@router.post("/sync")
-async def sync_user_profile(current_user: User = Depends(get_current_active_user)):
-    """Sync user profile with latest Supabase data"""
-    return {"message": "Profile synced successfully", "user": current_user}
-
-@router.get("/session")
-async def check_session(authorization: str = Header(None)):
-    """Check if current session is valid"""
-    if not authorization:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No session found"
-        )
-    
-    try:
-        scheme, token = authorization.split()
-        if scheme.lower() != "bearer":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid session format"
-            )
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid session format"
-        )
-    
-    supabase_user_data = await verify_supabase_token(token)
-    if not supabase_user_data:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session expired"
-        )
-    
-    return {
-        "valid": True,
-        "user_id": supabase_user_data["id"],
-        "email": supabase_user_data["email"],
-        "email_verified": supabase_user_data["email_verified"]
-    }
+    return None
 
 @router.post("/login")
 async def login(user_login: UserLogin, db: AsyncSession = Depends(get_db)):
-    supabase = get_supabase_client()
+    """Login with Supabase Auth"""
     try:
+        supabase = get_supabase_auth_client()
         data = await anyio.to_thread.run_sync(
-            lambda: supabase.auth.sign_in_with_password({"email": user_login.email, "password": user_login.password})
+            lambda: supabase.auth.sign_in_with_password({
+                "email": user_login.email,
+                "password": user_login.password
+            })
         )
+        
         supabase_user_data = await verify_supabase_token(data.session.access_token)
         db_user = await get_or_create_user_from_supabase(db, supabase_user_data)
-        return {"access_token": data.session.access_token, "token_type": "bearer"}
+        
+        return {
+            "access_token": data.session.access_token,
+            "token_type": "bearer",
+            "user": db_user
+        }
     except Exception as e:
-        raise HTTPException(status_code=401, detail=str(e))
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+
+@router.post("/register")
+async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
+    """Register via Supabase Auth"""
+    try:
+        supabase = get_supabase_auth_client()
+        data = await anyio.to_thread.run_sync(
+            lambda: supabase.auth.sign_up({
+                "email": user_data.email,
+                "password": user_data.password,
+                "options": {
+                    "data": {
+                        "full_name": user_data.full_name,
+                        "phone": user_data.phone
+                    }
+                }
+            })
+        )
+        
+        if data.user:
+            supabase_user_data = {
+                "id": data.user.id,
+                "email": data.user.email,
+                "user_metadata": data.user.user_metadata or {}
+            }
+            
+            db_user = await get_or_create_user_from_supabase(db, supabase_user_data)
+            
+            return {
+                "message": "User registered successfully",
+                "user": db_user,
+                "access_token": data.session.access_token if data.session else None
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Registration failed")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Registration failed: {str(e)}")

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.api.api_v1.endpoints.auth import get_current_active_user
-from app.models.user import User
+from app.schemas.user import User as UserSchema
 from app.schemas.booking import (
     BookingCreate, BookingUpdate, Booking, BookingList, BookingCancel,
     BookingPayment, BookingReview, BookingAvailability, BookingPricing
@@ -19,21 +19,21 @@ router = APIRouter()
 @router.post("/", response_model=Booking)
 async def create_new_booking(
     booking: BookingCreate,
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     return await create_booking(db, current_user.id, booking)
 
 @router.get("/", response_model=BookingList)
 async def get_my_bookings(
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     return await get_user_bookings(db, current_user.id)
 
 @router.get("/upcoming")
 async def get_upcoming_bookings(
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     from app.services.booking import get_user_upcoming_bookings
@@ -41,7 +41,7 @@ async def get_upcoming_bookings(
 
 @router.get("/past")
 async def get_past_bookings(
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     from app.services.booking import get_user_past_bookings
@@ -76,7 +76,7 @@ async def calculate_booking_pricing(
 @router.get("/{booking_id}", response_model=Booking)
 async def get_booking_details(
     booking_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     booking = await get_booking(db, booking_id)
@@ -93,7 +93,7 @@ async def get_booking_details(
 async def update_booking_details(
     booking_id: int,
     booking_update: BookingUpdate,
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     booking = await get_booking(db, booking_id)
@@ -109,7 +109,7 @@ async def update_booking_details(
 @router.post("/cancel", response_model=MessageResponse)
 async def cancel_booking_request(
     cancel_data: BookingCancel,
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     booking = await get_booking(db, cancel_data.booking_id)
@@ -129,7 +129,7 @@ async def cancel_booking_request(
 @router.post("/payment", response_model=MessageResponse)
 async def process_booking_payment(
     payment_data: BookingPayment,
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     booking = await get_booking(db, payment_data.booking_id)
@@ -149,7 +149,7 @@ async def process_booking_payment(
 @router.post("/review", response_model=MessageResponse)
 async def add_booking_review(
     review_data: BookingReview,
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     booking = await get_booking(db, review_data.booking_id)

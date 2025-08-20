@@ -2,10 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.api.api_v1.endpoints.auth import get_current_active_user
-from app.models.user import User
+from app.schemas.user import User as UserSchema
 from app.schemas.visit import (
-    VisitCreate, VisitUpdate, Visit, VisitList, VisitReschedule, VisitCancel,
-    RelationshipManager
+    VisitCreate, VisitUpdate, Visit, VisitList, VisitReschedule, VisitCancel
 )
 from app.schemas.common import MessageResponse
 from app.services.visit import (
@@ -18,21 +17,21 @@ router = APIRouter()
 @router.post("/", response_model=Visit)
 async def schedule_visit(
     visit: VisitCreate,
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     return await create_visit(db, current_user.id, visit)
 
 @router.get("/", response_model=VisitList)
 async def get_my_visits(
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     return await get_user_visits(db, current_user.id)
 
 @router.get("/upcoming")
 async def get_upcoming_visits(
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     from app.services.visit import get_user_upcoming_visits
@@ -40,15 +39,15 @@ async def get_upcoming_visits(
 
 @router.get("/past")
 async def get_past_visits(
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     from app.services.visit import get_user_past_visits
     return await get_user_past_visits(db, current_user.id)
 
-@router.get("/relationship-manager", response_model=RelationshipManager)
+@router.get("/relationship-manager")
 async def get_my_relationship_manager(
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     rm = await get_user_relationship_manager(db, current_user.id)
@@ -59,7 +58,7 @@ async def get_my_relationship_manager(
 @router.get("/{visit_id}", response_model=Visit)
 async def get_visit_details(
     visit_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     visit = await get_visit(db, visit_id)
@@ -76,7 +75,7 @@ async def get_visit_details(
 async def update_visit_details(
     visit_id: int,
     visit_update: VisitUpdate,
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     visit = await get_visit(db, visit_id)
@@ -92,7 +91,7 @@ async def update_visit_details(
 @router.post("/reschedule", response_model=MessageResponse)
 async def reschedule_visit_date(
     reschedule_data: VisitReschedule,
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     visit = await get_visit(db, reschedule_data.visit_id)
@@ -112,7 +111,7 @@ async def reschedule_visit_date(
 @router.post("/cancel", response_model=MessageResponse)
 async def cancel_visit_request(
     cancel_data: VisitCancel,
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     visit = await get_visit(db, cancel_data.visit_id)

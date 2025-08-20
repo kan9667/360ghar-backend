@@ -1,80 +1,51 @@
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
-import logging
-
 from app.core.config import settings
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
-# Create async engine with transaction pooler compatibility
+# Base class for all models
+class Base(DeclarativeBase):
+    pass
+
+# Log database connection info
+logger.info(f"Connecting to database with psycopg for PgBouncer compatibility")
+
+# Create async engine using psycopg for better PgBouncer compatibility
 engine = create_async_engine(
-    settings.ASYNC_DATABASE_URL,  # postgresql+asyncpg://...
-    echo=False,
-    pool_size=20,  # Good for transaction pooler
-    max_overflow=10,  # Reasonable overflow
-    pool_pre_ping=True,  # Verify connections before using
-    pool_recycle=1800,  # Recycle connections after 30 minutes
+    settings.ASYNC_DATABASE_URL,
+    pool_size=20,
+    max_overflow=40,
+    pool_pre_ping=True,
+    pool_recycle=3600,
+    echo=settings.DEBUG,
+    future=True,
+    # Connection settings for PgBouncer compatibility
     connect_args={
-        "server_settings": {
-            "jit": "off"  # Disable JIT for consistent performance
-        },
-        "command_timeout": 60,  # Standard timeout
-        # Disable prepared statements when behind PgBouncer (transaction/statement pooler)
-        # asyncpg uses 'prepared_statement_cache_size' (SQLAlchemy wrapper) and 'statement_cache_size' (asyncpg)
-        # Setting both ensures compatibility across versions
-        "prepared_statement_cache_size": 0,
-        "statement_cache_size": 0,
+        "application_name": "360ghar_backend",  # For monitoring
+        "prepare_threshold": None,  # Disable prepared statements for PgBouncer
     }
 )
 
-# Create async session factory
+# Session factory
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
     expire_on_commit=False,
-    autocommit=False,
     autoflush=False,
+    autocommit=False
 )
 
-class Base(DeclarativeBase):
-    """Base class for all models"""
-    pass
-
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency for getting async database session"""
+# Dependency for FastAPI
+async def get_db() -> AsyncSession:
     async with AsyncSessionLocal() as session:
         try:
             yield session
             await session.commit()
-        except Exception:
-            # Log unexpected session errors without leaking sensitive data
-            logger.exception("DB session error; rolling back")
+        except Exception as e:
+            logger.error(f"Database session error: {e}")
             await session.rollback()
             raise
         finally:
             await session.close()
-
-@asynccontextmanager
-async def get_db_context():
-    """Context manager for database operations outside of request context"""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            logger.exception("DB context error; rolling back")
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
-async def init_db():
-    """Initialize database tables"""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-async def close_db():
-    """Close database connections"""
-    await engine.dispose()

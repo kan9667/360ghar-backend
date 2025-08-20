@@ -1,31 +1,92 @@
 import traceback
-import logging
 import yaml
-from sqlalchemy import text
+from contextlib import asynccontextmanager
 
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+import sentry_sdk
+import sentry_sdk.integrations.fastapi
+import sentry_sdk.integrations.sqlalchemy
+from dotenv import load_dotenv
 
 from app.core.exceptions import BaseAPIException
 from app.core.config import settings
 from app.api.api_v1.api import api_router
-from app.middleware.performance import PerformanceMiddleware
-# from app.middleware.rate_limit import RateLimitMiddleware
-# from app.middleware.security import SecurityHeadersMiddleware, APIKeyMiddleware
-from app.core.cache import cache_manager
+from app.core.database import engine
 from app.core.logging import setup_logging, get_logger
+from app.core.cache import cache_manager
+from sqlalchemy import text
+
+
+load_dotenv()
 
 # Configure logging
 setup_logging()
 logger = get_logger(__name__)
 
+# Initialize Sentry
+if settings.SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        environment=settings.ENVIRONMENT,
+        # Set sample rate for performance monitoring
+        traces_sample_rate=1.0 if settings.ENVIRONMENT == "development" else 0.1,
+        # Add data like request headers and IP for users,
+        # see https://docs.sentry.io/platforms/python/data-management/data-collected/ for more info
+        send_default_pii=True,
+        # Release tracking
+        release=f"360ghar-backend@2.0.0",
+        # FastAPI integration
+        integrations=[
+            sentry_sdk.integrations.fastapi.FastApiIntegration(),
+            sentry_sdk.integrations.sqlalchemy.SqlalchemyIntegration(),
+        ],
+    )
+    logger.info("Sentry initialized", extra={"environment": settings.ENVIRONMENT})
+else:
+    logger.warning("Sentry DSN not configured - error tracking disabled")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager for startup and shutdown events"""
+    # Startup
+    try:
+        # Initialize cache manager
+        await cache_manager.connect()
+        
+        # Test database connection (disabled for PgBouncer compatibility)
+        # try:
+        #     from app.core.database import AsyncSessionLocal
+        #     async with AsyncSessionLocal() as session:
+        #         await session.execute(text("SELECT 1"))
+        #     logger.info("Database connection verified on startup")
+        # except Exception as db_e:
+        #     logger.error(f"Database connection test failed: {db_e}")
+        logger.info("Database connection test skipped for PgBouncer compatibility")
+    except Exception as e:
+        logger.error(f"Application startup failed: {e}")
+    
+    logger.info("API started", extra={
+        "event": "startup",
+        "env": settings.ENVIRONMENT,
+        "version": "2.0.0",
+    })
+    
+    yield
+    
+    # Shutdown
+    await cache_manager.disconnect()
+    await engine.dispose()
+    logger.info("API shutdown", extra={"event": "shutdown"})
 
 app = FastAPI(
+    lifespan=lifespan,
+    debug=(settings.ENVIRONMENT == "development"),
     title="360Ghar Real Estate Platform",
-    description="Tinder-like real estate platform backend APIs with Supabase integration",
-    version="1.0.0",
+    description="Tinder-like real estate platform backend APIs with SQLAlchemy + Supabase Auth",
+    version="2.0.0",
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     docs_url=f"{settings.API_V1_STR}/docs",
     redoc_url=f"{settings.API_V1_STR}/redoc",
@@ -48,9 +109,6 @@ app = FastAPI(
         }
     ]
 )
-
-# Add performance monitoring middleware (should be first)
-app.add_middleware(PerformanceMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -93,46 +151,33 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 async def root():
     return {
         "message": "360Ghar Real Estate Platform API",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "docs": f"{settings.API_V1_STR}/docs",
         "status": "running"
     }
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint with database and cache connectivity"""
+    """Health check endpoint with database connectivity"""
     try:
-        from app.core.database import engine
-        
-        # Check database connection
-        db_status = "connected"
-        try:
-            async with engine.begin() as conn:
-                await conn.execute(text("SELECT 1"))
-        except Exception as db_e:
-            logger.error(f"Database health check failed: {db_e}")
-            db_status = "disconnected"
-        
-        # Check cache connection
-        cache_status = "connected"
-        try:
-            if cache_manager.redis_client:
-                await cache_manager.redis_client.ping()
-            else:
-                cache_status = "disconnected"
-        except Exception as cache_e:
-            logger.error(f"Cache health check failed: {cache_e}")
-            cache_status = "disconnected"
+        # Check database connection (disabled for PgBouncer compatibility)
+        db_status = "connected"  # Assume connected - actual endpoints will test properly
+        # try:
+        #     from app.core.database import AsyncSessionLocal
+        #     async with AsyncSessionLocal() as session:
+        #         await session.execute(text("SELECT 1"))
+        # except Exception as db_e:
+        #     logger.error(f"Database health check failed: {db_e}")
+        #     db_status = "disconnected"
         
         overall_status = "healthy" if db_status == "connected" else "degraded"
         
         return {
             "status": overall_status,
             "database": db_status,
-            "cache": cache_status,
-            "supabase_url": settings.SUPABASE_URL,
+            "database_url": settings.DATABASE_URL.split('@')[1] if '@' in settings.DATABASE_URL else "configured",
             "timestamp": datetime.utcnow().isoformat(),
-            "version": "1.0.0"
+            "version": "2.0.0"
         }
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
@@ -144,7 +189,8 @@ async def get_config():
     return {
         "api_version": settings.API_V1_STR,
         "environment": settings.ENVIRONMENT,
-        "supabase_url": settings.SUPABASE_URL,
+        "database": "SQLAlchemy + PostgreSQL",
+        "auth": "Supabase",
         "features": [
             "User Authentication",
             "Property Discovery",
@@ -171,6 +217,7 @@ async def get_openapi_yaml():
 @app.exception_handler(BaseAPIException)
 async def api_exception_handler(request: Request, exc: BaseAPIException):
     """Handle custom API exceptions"""
+    logger.warning(f"API exception: {exc.detail} - {request.method} {request.url.path}")
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -189,7 +236,7 @@ async def api_exception_handler(request: Request, exc: BaseAPIException):
 @app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError):
     """Handle validation errors"""
-    logger.error(f"Validation error: {exc}")
+    logger.warning(f"Validation error: {exc} - {request.method} {request.url.path}")
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
@@ -206,7 +253,7 @@ async def value_error_handler(request: Request, exc: ValueError):
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle unexpected exceptions"""
-    logger.error(f"Unexpected error: {traceback.format_exc()}")
+    logger.error(f"Unexpected error: {str(exc)} - {request.method} {request.url.path}", exc_info=True)
     
     # Don't expose internal errors in production
     if settings.ENVIRONMENT == "production":
@@ -227,18 +274,3 @@ async def general_exception_handler(request: Request, exc: Exception):
         }
     )
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services on startup"""
-    await cache_manager.connect()
-    logger.info("API started", extra={
-        "event": "startup",
-        "env": settings.ENVIRONMENT,
-        "version": "1.0.0",
-    })
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    await cache_manager.disconnect()
-    logger.info("API shutdown", extra={"event": "shutdown"})

@@ -1,57 +1,189 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime
-from app.repositories.visit import VisitRepository
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+from datetime import datetime, timezone
+from app.models.models import Visit, Agent, User, Property
 from app.schemas.visit import VisitCreate, VisitUpdate
 from typing import Optional
 
 async def create_visit(db: AsyncSession, user_id: int, visit: VisitCreate):
-    visit_repo = VisitRepository(db)
-    return await visit_repo.create_visit(user_id, visit)
+    """Create a new visit"""
+    visit_data = visit.model_dump()
+    visit_data["user_id"] = user_id
+    
+    db_visit = Visit(**visit_data)
+    db.add(db_visit)
+    await db.flush()
+    await db.refresh(db_visit)
+    return db_visit
 
 async def get_visit(db: AsyncSession, visit_id: int):
-    visit_repo = VisitRepository(db)
-    return await visit_repo.get_with_rm(visit_id)
+    """Get a visit by ID"""
+    stmt = select(Visit).options(
+        selectinload(Visit.property).selectinload(Property.images),
+        selectinload(Visit.property).selectinload(Property.property_amenities)
+    ).where(Visit.id == visit_id)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
 
 async def get_user_visits(db: AsyncSession, user_id: int):
-    visit_repo = VisitRepository(db)
-    return await visit_repo.get_user_visits(user_id)
+    """Get all visits for a user"""
+    stmt = select(Visit).options(
+        selectinload(Visit.property).selectinload(Property.images),
+        selectinload(Visit.property).selectinload(Property.property_amenities)
+    ).where(Visit.user_id == user_id).order_by(Visit.scheduled_date.desc())
+    result = await db.execute(stmt)
+    visits = result.scalars().all()
+    
+    # Count visits by status
+    now = datetime.now(timezone.utc)
+    upcoming = sum(1 for v in visits if v.status in ["scheduled", "confirmed"] and v.scheduled_date > now)
+    completed = sum(1 for v in visits if v.status == "completed")
+    cancelled = sum(1 for v in visits if v.status == "cancelled")
+    
+    return {
+        "visits": visits, 
+        "total": len(visits),
+        "upcoming": upcoming,
+        "completed": completed,
+        "cancelled": cancelled
+    }
 
 async def get_user_upcoming_visits(db: AsyncSession, user_id: int):
-    visit_repo = VisitRepository(db)
-    return await visit_repo.get_user_upcoming_visits(user_id)
+    """Get upcoming visits for a user"""
+    now = datetime.now(timezone.utc)
+    stmt = select(Visit).options(
+        selectinload(Visit.property).selectinload(Property.images),
+        selectinload(Visit.property).selectinload(Property.property_amenities)
+    ).where(
+        Visit.user_id == user_id,
+        Visit.scheduled_date > now,
+        Visit.status.in_(["scheduled", "confirmed"])
+    ).order_by(Visit.scheduled_date)
+    result = await db.execute(stmt)
+    visits = result.scalars().all()
+    return {"visits": visits, "total": len(visits)}
 
 async def get_user_past_visits(db: AsyncSession, user_id: int):
-    visit_repo = VisitRepository(db)
-    return await visit_repo.get_user_past_visits(user_id)
+    """Get past visits for a user"""
+    now = datetime.now(timezone.utc)
+    stmt = select(Visit).options(
+        selectinload(Visit.property).selectinload(Property.images),
+        selectinload(Visit.property).selectinload(Property.property_amenities)
+    ).where(
+        Visit.user_id == user_id,
+        Visit.scheduled_date < now
+    ).order_by(Visit.scheduled_date.desc())
+    result = await db.execute(stmt)
+    visits = result.scalars().all()
+    return {"visits": visits, "total": len(visits)}
 
 async def update_visit(db: AsyncSession, visit_id: int, visit_update: VisitUpdate):
-    visit_repo = VisitRepository(db)
-    return await visit_repo.update_visit(visit_id, visit_update)
+    """Update a visit"""
+    stmt = select(Visit).where(Visit.id == visit_id)
+    result = await db.execute(stmt)
+    visit = result.scalar_one_or_none()
+    
+    if visit:
+        update_data = visit_update.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(visit, field, value)
+        
+        await db.flush()
+        await db.refresh(visit)
+    
+    return visit
 
 async def cancel_visit(db: AsyncSession, visit_id: int, reason: str):
-    visit_repo = VisitRepository(db)
-    return await visit_repo.cancel_visit(visit_id, reason)
+    """Cancel a visit"""
+    stmt = select(Visit).where(Visit.id == visit_id)
+    result = await db.execute(stmt)
+    visit = result.scalar_one_or_none()
+    
+    if visit:
+        visit.status = "cancelled"
+        visit.cancellation_reason = reason
+        await db.flush()
+        return True
+    
+    return False
 
 async def reschedule_visit(db: AsyncSession, visit_id: int, new_date: datetime, reason: Optional[str] = None):
-    visit_repo = VisitRepository(db)
-    return await visit_repo.reschedule_visit(visit_id, new_date, reason)
+    """Reschedule a visit"""
+    stmt = select(Visit).where(Visit.id == visit_id)
+    result = await db.execute(stmt)
+    visit = result.scalar_one_or_none()
+    
+    if visit:
+        visit.rescheduled_from = visit.scheduled_date
+        visit.scheduled_date = new_date
+        visit.status = "rescheduled"
+        if reason:
+            visit.cancellation_reason = reason
+        await db.flush()
+        return True
+    
+    return False
 
 async def get_user_relationship_manager(db: AsyncSession, user_id: int):
-    visit_repo = VisitRepository(db)
-    return await visit_repo.get_user_relationship_manager(user_id)
+    """Get the relationship manager (agent) for a user"""
+    stmt = select(User).where(User.id == user_id)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+    
+    if user and user.agent_id:
+        stmt = select(Agent).where(Agent.id == user.agent_id)
+        result = await db.execute(stmt)
+        agent = result.scalar_one_or_none()
+        if agent:
+            return {
+                "id": agent.id,
+                "name": agent.name,
+                "description": agent.description,
+                "avatar_url": agent.avatar_url,
+                "languages": agent.languages
+            }
+    
+    return None
 
-async def get_available_relationship_manager(db: AsyncSession):
-    visit_repo = VisitRepository(db)
-    return await visit_repo.get_available_relationship_manager()
-
-async def create_relationship_manager(db: AsyncSession, rm_data: dict):
-    visit_repo = VisitRepository(db)
-    return await visit_repo.create_relationship_manager(rm_data)
-
-async def get_all_relationship_managers(db: AsyncSession):
-    visit_repo = VisitRepository(db)
-    return await visit_repo.get_all_relationship_managers()
+async def get_agent_visits(db: AsyncSession, agent_id: int, page: int = 1, limit: int = 20):
+    """Get visits handled by a specific agent"""
+    offset = (page - 1) * limit
+    
+    stmt = select(Visit).options(
+        selectinload(Visit.property).selectinload(Property.images),
+        selectinload(Visit.property).selectinload(Property.property_amenities)
+    ).where(Visit.agent_id == agent_id).offset(offset).limit(limit).order_by(Visit.scheduled_date.desc())
+    result = await db.execute(stmt)
+    visits = result.scalars().all()
+    
+    # Get total count
+    count_stmt = select(Visit).where(Visit.agent_id == agent_id)
+    count_result = await db.execute(count_stmt)
+    total = len(count_result.scalars().all())
+    
+    return {
+        "visits": visits,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": (total + limit - 1) // limit
+    }
 
 async def mark_visit_completed(db: AsyncSession, visit_id: int, notes: str = None, feedback: str = None):
-    visit_repo = VisitRepository(db)
-    return await visit_repo.mark_visit_completed(visit_id, notes, feedback)
+    """Mark a visit as completed"""
+    stmt = select(Visit).where(Visit.id == visit_id)
+    result = await db.execute(stmt)
+    visit = result.scalar_one_or_none()
+    
+    if visit:
+        visit.status = "completed"
+        visit.actual_date = datetime.now(timezone.utc)
+        if notes:
+            visit.visit_notes = notes
+        if feedback:
+            visit.visitor_feedback = feedback
+        await db.flush()
+        return True
+    
+    return False
