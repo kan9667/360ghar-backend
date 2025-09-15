@@ -101,26 +101,28 @@ class PagePublicResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# App Update Schemas
-class AppUpdateCreate(BaseModel):
+# App Version Schemas
+class AppVersionCreate(BaseModel):
+    app: str = Field(..., description="App identifier (e.g., 'user', 'agent')")
     platform: str = Field(..., description="Platform (ios, android, web)")
     version: str = Field(..., description="Version string (e.g., '1.2.3')")
     build_number: Optional[int] = Field(None, description="Build number")
     release_notes: Optional[str] = Field(None, description="Release notes")
-    download_url: Optional[str] = Field(None, description="Download URL for the update")
-    is_mandatory: bool = Field(default=False, description="Whether the update is mandatory")
-    is_active: bool = Field(default=True, description="Whether this update is active")
+    download_url: Optional[str] = Field(None, description="Download URL for the app version")
+    is_mandatory: bool = Field(default=False, description="Whether the version is mandatory")
+    is_active: bool = Field(default=True, description="Whether this version is active")
     min_supported_version: Optional[str] = Field(None, description="Minimum supported version")
 
-class AppUpdateUpdate(BaseModel):
+class AppVersionUpdate(BaseModel):
     release_notes: Optional[str] = Field(None, description="Release notes")
     download_url: Optional[str] = Field(None, description="Download URL")
-    is_mandatory: Optional[bool] = Field(None, description="Whether the update is mandatory")
-    is_active: Optional[bool] = Field(None, description="Whether this update is active")
+    is_mandatory: Optional[bool] = Field(None, description="Whether the version is mandatory")
+    is_active: Optional[bool] = Field(None, description="Whether this version is active")
     min_supported_version: Optional[str] = Field(None, description="Minimum supported version")
 
-class AppUpdateResponse(BaseModel):
+class AppVersionResponse(BaseModel):
     id: int
+    app: str
     platform: str
     version: str
     build_number: Optional[int]
@@ -135,12 +137,13 @@ class AppUpdateResponse(BaseModel):
     class Config:
         from_attributes = True
 
-class AppUpdateCheckRequest(BaseModel):
+class AppVersionCheckRequest(BaseModel):
+    app: str = Field(..., description="App identifier (e.g., 'user', 'agent')")
     platform: str = Field(..., description="Platform (ios, android, web)")
     current_version: str = Field(..., description="Current app version")
     build_number: Optional[int] = Field(None, description="Current build number")
 
-class AppUpdateCheckResponse(BaseModel):
+class AppVersionCheckResponse(BaseModel):
     update_available: bool
     is_mandatory: bool = False
     latest_version: Optional[str] = None

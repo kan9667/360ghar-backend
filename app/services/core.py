@@ -4,13 +4,13 @@ from sqlalchemy.orm import selectinload
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-from app.models.models import BugReport, Page, AppUpdate, User, FAQ
+from app.models.models import BugReport, Page, AppVersion, User, FAQ
 from app.models.enums import BugStatus, PageFormat, BugType
 from app.schemas.core import (
     BugReportCreate, BugReportUpdate, BugReportResponse,
     PageCreate, PageUpdate, PageResponse, PagePublicResponse,
-    AppUpdateCreate, AppUpdateUpdate, AppUpdateResponse,
-    AppUpdateCheckRequest, AppUpdateCheckResponse,
+    AppVersionCreate, AppVersionUpdate, AppVersionResponse,
+    AppVersionCheckRequest, AppVersionCheckResponse,
     FAQCreate, FAQUpdate, FAQResponse
 )
 from app.core.exceptions import NotFoundException, ValidationException
@@ -246,112 +246,115 @@ class CoreService:
 
         return result.rowcount > 0
 
-    # App Update Methods
-    async def create_app_update(self, update_data: AppUpdateCreate) -> AppUpdateResponse:
-        """Create a new app update"""
-        app_update = AppUpdate(**update_data.model_dump())
+    # App Version Methods
+    async def create_app_version(self, version_data: AppVersionCreate) -> AppVersionResponse:
+        """Create a new app version entry"""
+        app_version = AppVersion(**version_data.model_dump())
 
-        self.db.add(app_update)
+        self.db.add(app_version)
         await self.db.commit()
-        await self.db.refresh(app_update)
+        await self.db.refresh(app_version)
 
-        return AppUpdateResponse.model_validate(app_update)
+        return AppVersionResponse.model_validate(app_version)
 
-    async def check_for_updates(self, check_data: AppUpdateCheckRequest) -> AppUpdateCheckResponse:
-        """Check if there's an available update for the given platform and version"""
-        # Get the latest active update for the platform
-        query = select(AppUpdate).where(
-            and_(
-                AppUpdate.platform == check_data.platform,
-                AppUpdate.is_active == True
+    async def check_for_updates(self, check_data: AppVersionCheckRequest) -> AppVersionCheckResponse:
+        """Check if there's an available update for the given app, platform, and version"""
+        query = (
+            select(AppVersion)
+            .where(
+                and_(
+                    AppVersion.app == check_data.app,
+                    AppVersion.platform == check_data.platform,
+                    AppVersion.is_active == True,
+                )
             )
-        ).order_by(desc(AppUpdate.created_at)).limit(1)
+            .order_by(desc(AppVersion.created_at))
+            .limit(1)
+        )
 
         result = await self.db.execute(query)
-        latest_update = result.scalar_one_or_none()
+        latest_version_entry = result.scalar_one_or_none()
 
-        if not latest_update:
-            return AppUpdateCheckResponse(update_available=False)
+        if not latest_version_entry:
+            return AppVersionCheckResponse(update_available=False)
 
-        # Compare versions (simple string comparison - in production, use proper version comparison)
         current_version = check_data.current_version
-        latest_version = latest_update.version
+        latest_version = latest_version_entry.version
 
-        # Simple version comparison (you might want to use a proper version comparison library)
+        # Simple version comparison (consider using proper semver comparison in production)
         update_available = latest_version != current_version
 
-        # Check if current version is below minimum supported version
-        min_supported = latest_update.min_supported_version
+        min_supported = latest_version_entry.min_supported_version
         is_below_min = False
         if min_supported and current_version < min_supported:
             is_below_min = True
             update_available = True
 
-        return AppUpdateCheckResponse(
+        return AppVersionCheckResponse(
             update_available=update_available,
-            is_mandatory=latest_update.is_mandatory or is_below_min,
+            is_mandatory=latest_version_entry.is_mandatory or is_below_min,
             latest_version=latest_version,
-            download_url=latest_update.download_url,
-            release_notes=latest_update.release_notes,
-            min_supported_version=min_supported
+            download_url=latest_version_entry.download_url,
+            release_notes=latest_version_entry.release_notes,
+            min_supported_version=min_supported,
         )
 
-    async def get_app_updates(
+    async def get_app_versions(
         self,
+        app: Optional[str] = None,
         platform: Optional[str] = None,
         is_active: Optional[bool] = None,
         limit: int = 10,
-        offset: int = 0
-    ) -> List[AppUpdateResponse]:
-        """Get app updates with optional filtering"""
-        query = select(AppUpdate)
+        offset: int = 0,
+    ) -> List[AppVersionResponse]:
+        """Get app versions with optional filtering"""
+        query = select(AppVersion)
+
+        if app:
+            query = query.where(AppVersion.app == app)
 
         if platform:
-            query = query.where(AppUpdate.platform == platform)
+            query = query.where(AppVersion.platform == platform)
 
         if is_active is not None:
-            query = query.where(AppUpdate.is_active == is_active)
+            query = query.where(AppVersion.is_active == is_active)
 
-        query = query.order_by(desc(AppUpdate.created_at)).limit(limit).offset(offset)
+        query = query.order_by(desc(AppVersion.created_at)).limit(limit).offset(offset)
 
         result = await self.db.execute(query)
-        updates = result.scalars().all()
+        versions = result.scalars().all()
 
-        return [AppUpdateResponse.model_validate(update) for update in updates]
+        return [AppVersionResponse.model_validate(version) for version in versions]
 
-    async def update_app_update(
+    async def update_app_version(
         self,
-        update_id: int,
-        update_data: AppUpdateUpdate
-    ) -> AppUpdateResponse:
-        """Update an app update entry"""
-        # Check if update exists
-        existing_update = await self.db.execute(
-            select(AppUpdate).where(AppUpdate.id == update_id)
+        version_id: int,
+        update_data: AppVersionUpdate
+    ) -> AppVersionResponse:
+        """Update an app version entry"""
+        existing_version = await self.db.execute(
+            select(AppVersion).where(AppVersion.id == version_id)
         )
-        app_update = existing_update.scalar_one_or_none()
+        app_version = existing_version.scalar_one_or_none()
 
-        if not app_update:
-            raise NotFoundException(f"App update with ID {update_id} not found")
+        if not app_version:
+            raise NotFoundException(f"App version with ID {version_id} not found")
 
-        # Prepare update data
         update_dict = update_data.model_dump(exclude_unset=True)
 
-        # Update the app update
         query = (
-            update(AppUpdate)
-            .where(AppUpdate.id == update_id)
+            update(AppVersion)
+            .where(AppVersion.id == version_id)
             .values(**update_dict)
         )
 
         await self.db.execute(query)
         await self.db.commit()
 
-        # Return updated app update
-        result = await self.db.execute(select(AppUpdate).where(AppUpdate.id == update_id))
-        updated_update = result.scalar_one()
+        result = await self.db.execute(select(AppVersion).where(AppVersion.id == version_id))
+        updated_version = result.scalar_one()
 
-        return AppUpdateResponse.model_validate(updated_update)
+        return AppVersionResponse.model_validate(updated_version)
 
     # FAQ Methods
     async def create_faq(self, faq_data: FAQCreate) -> FAQResponse:

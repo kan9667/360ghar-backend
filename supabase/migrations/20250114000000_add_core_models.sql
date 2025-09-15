@@ -1,4 +1,4 @@
--- Add core models: BugReport, Page, AppUpdate
+-- Add core models: BugReport, Page, AppVersion
 -- Migration: 20250114000000_add_core_models
 
 BEGIN;

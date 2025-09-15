@@ -341,10 +341,11 @@ class Page(Base):
     creator: Mapped[Optional["User"]] = relationship("User", foreign_keys=[created_by])
     updater: Mapped[Optional["User"]] = relationship("User", foreign_keys=[updated_by])
 
-class AppUpdate(Base):
-    __tablename__ = "app_updates"
+class AppVersion(Base):
+    __tablename__ = "app_versions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    app: Mapped[str] = mapped_column(String, nullable=False)  # app identifier (e.g., user, agent)
     platform: Mapped[str] = mapped_column(String, nullable=False)  # ios, android, web
     version: Mapped[str] = mapped_column(String, nullable=False)
     build_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

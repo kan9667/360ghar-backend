@@ -8,6 +8,7 @@ This folder contains scripts to seed the database with initial or sample data us
 - `populate_data/data/users.json` – onboarding users; `supabase_user_id` is optional and gets generated when omitted or `null`.
 - `populate_data/data/faqs.json` – frequently asked questions for the public help centre.
 - `populate_data/data/pages.json` – CMS-style pages for policies, terms, and other static copy.
+- `populate_data/data/app_versions.json` – app versions for 360ghar_real_estate and 360ghar_short_stays across iOS, Android, and web platforms.
 
 Update these files to adjust default records. Every populator parses the JSON, validates the payload, and skips entries that already exist in the database when possible.
 
@@ -91,6 +92,27 @@ The `FAQPopulator` seeds the `faqs` table from `populate_data/data/faqs.json`.
   ```bash
   PYTHONPATH=/Users/sakshammittal/Documents/360ghar/backend python populate_data/populate_faqs.py --file path/to/faqs.json
   ```
+
+## App Versions
+
+The `load_app_versions.py` script populates app version information for both 360ghar_real_estate and 360ghar_short_stays apps across all platforms.
+
+- Load app versions:
+
+  ```bash
+  PYTHONPATH=/Users/sakshammittal/Documents/360ghar/backend python populate_data/load_app_versions.py
+  ```
+
+- Clear existing app versions before loading:
+
+  ```bash
+  PYTHONPATH=/Users/sakshammittal/Documents/360ghar/backend python populate_data/load_app_versions.py --clear
+  ```
+
+Notes:
+- Creates initial version records for both apps (1.0.0) on iOS, Android, and web platforms
+- Includes release notes, download URLs, and mandatory update flags
+- Use the `--clear` flag to remove all existing app versions before loading new ones
 
 ## Other Populators
 

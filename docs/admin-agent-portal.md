@@ -33,7 +33,7 @@ Stack: React + Redux Toolkit (with RTK Query) + Shadcn UI. Backend: FastAPI + Su
 - Bookings: global listing with filters, process payments, add reviews.
 - Amenities: fetch list for forms.
 - Uploads: generic file upload (returns public URL).
-- Core Features: Bug reports, pages management, app updates.
+- Core Features: Bug reports, pages management, app versions.
 
 ### Agent
 
@@ -1091,14 +1091,15 @@ Until these endpoints land, store `main_image_url` only. Keep gallery `public_ur
 - **Access**: Admin only
 - **Response**: Success message
 
-#### App Updates
+#### App Versions
 
-##### POST `/updates/`
-- **Description**: Create a new app update entry
+##### POST `/versions/`
+- **Description**: Create a new app version entry
 - **Access**: Admin only
 - **Request Body**:
   ```json
   {
+    "app": "user",
     "platform": "ios",
     "version": "1.2.4",
     "build_number": 124,
@@ -1109,14 +1110,15 @@ Until these endpoints land, store `main_image_url` only. Keep gallery `public_ur
     "min_supported_version": "1.0.0"
   }
   ```
-- **Response**: Created app update object
+- **Response**: Created app version object
 
-##### POST `/updates/check`
+##### POST `/versions/check`
 - **Description**: Check if there's an available update
 - **Access**: Public (no authentication required)
 - **Request Body**:
   ```json
   {
+    "app": "user",
     "platform": "ios",
     "current_version": "1.2.3",
     "build_number": 123
@@ -1134,21 +1136,22 @@ Until these endpoints land, store `main_image_url` only. Keep gallery `public_ur
   }
   ```
 
-##### GET `/updates/`
-- **Description**: List all app updates
+##### GET `/versions/`
+- **Description**: List all app versions
 - **Access**: Admin only
 - **Query Parameters**:
+  - `app`: str (optional) - App identifier (e.g., user, agent)
   - `platform`: str (optional) - ios, android, web
   - `is_active`: bool (optional)
   - `limit`: int (default: 10, min: 1, max: 100) - Number of results
   - `offset`: int (default: 0, min: 0) - Pagination offset
-- **Response**: List of app updates
+- **Response**: List of app versions
 
-##### PUT `/updates/{update_id}`
-- **Description**: Update app update entry
+##### PUT `/versions/{version_id}`
+- **Description**: Update app version entry
 - **Access**: Admin only
-- **Request Body**: App update fields to update
-- **Response**: Updated app update object
+- **Request Body**: App version fields to update
+- **Response**: Updated app version object
 
 #### System Health
 
@@ -1185,7 +1188,7 @@ export const api = createApi({
     },
   }),
   endpoints: () => ({}),
-  tagTypes: ['User', 'Agent', 'Property', 'Visit', 'Booking', 'BugReport', 'Page', 'AppUpdate', 'Amenity'],
+  tagTypes: ['User', 'Agent', 'Property', 'Visit', 'Booking', 'BugReport', 'Page', 'AppVersion', 'Amenity'],
 });
 ```
 
@@ -1617,39 +1620,39 @@ coreApi.injectEndpoints({
       invalidatesTags: ['Page']
     }),
 
-    // App Updates
-    createAppUpdate: builder.mutation<AppUpdateResponse, AppUpdateCreate>({
+    // App Versions
+    createAppVersion: builder.mutation<AppVersionResponse, AppVersionCreate>({
       query: (data) => ({
-        url: '/updates/',
+        url: '/versions/',
         method: 'POST',
         body: data
       }),
-      invalidatesTags: ['AppUpdate']
+      invalidatesTags: ['AppVersion']
     }),
 
-    checkForUpdates: builder.query<AppUpdateCheckResponse, AppUpdateCheckRequest>({
+    checkForUpdates: builder.query<AppVersionCheckResponse, AppVersionCheckRequest>({
       query: (data) => ({
-        url: '/updates/check',
+        url: '/versions/check',
         method: 'POST',
         body: data
       })
     }),
 
-    getAppUpdates: builder.query<AppUpdateResponse[], AppUpdatesQuery>({
+    getAppVersions: builder.query<AppVersionResponse[], AppVersionsQuery>({
       query: (params) => ({
-        url: '/updates/',
+        url: '/versions/',
         params: { limit: 10, offset: 0, ...params }
       }),
-      providesTags: ['AppUpdate']
+      providesTags: ['AppVersion']
     }),
 
-    updateAppUpdate: builder.mutation<AppUpdateResponse, { id: number; data: AppUpdateUpdate }>({
+    updateAppVersion: builder.mutation<AppVersionResponse, { id: number; data: AppVersionUpdate }>({
       query: ({ id, data }) => ({
-        url: `/updates/${id}`,
+        url: `/versions/${id}`,
         method: 'PUT',
         body: data
       }),
-      invalidatesTags: ['AppUpdate']
+      invalidatesTags: ['AppVersion']
     }),
 
     // Health Check

@@ -1,0 +1,68 @@
+[
+  {
+    "app": "360ghar_real_estate",
+    "platform": "ios",
+    "version": "1.0.0",
+    "build_number": 1,
+    "release_notes": "Initial release of 360Ghar Real Estate app for iOS. Features property discovery, swipe-based recommendations, visit scheduling, and agent management.",
+    "download_url": "https://apps.apple.com/app/360ghar-real-estate",
+    "is_mandatory": false,
+    "is_active": true,
+    "min_supported_version": null
+  },
+  {
+    "app": "360ghar_real_estate",
+    "platform": "android",
+    "version": "1.0.0",
+    "build_number": 1,
+    "release_notes": "Initial release of 360Ghar Real Estate app for Android. Features property discovery, swipe-based recommendations, visit scheduling, and agent management.",
+    "download_url": "https://play.google.com/store/apps/details?id=com.360ghar.real_estate",
+    "is_mandatory": false,
+    "is_active": true,
+    "min_supported_version": null
+  },
+  {
+    "app": "360ghar_real_estate",
+    "platform": "web",
+    "version": "1.0.0",
+    "build_number": null,
+    "release_notes": "Initial release of 360Ghar Real Estate web platform. Full-featured property discovery and management accessible from any browser.",
+    "download_url": "https://app.360ghar.com",
+    "is_mandatory": false,
+    "is_active": true,
+    "min_supported_version": null
+  },
+  {
+    "app": "360ghar_short_stays",
+    "platform": "ios",
+    "version": "1.0.0",
+    "build_number": 1,
+    "release_notes": "Initial release of 360Ghar Short Stays app for iOS. Book short-term stays with full property management and host integration.",
+    "download_url": "https://apps.apple.com/app/360ghar-short-stays",
+    "is_mandatory": false,
+    "is_active": true,
+    "min_supported_version": null
+  },
+  {
+    "app": "360ghar_short_stays",
+    "platform": "android",
+    "version": "1.0.0",
+    "build_number": 1,
+    "release_notes": "Initial release of 360Ghar Short Stays app for Android. Book short-term stays with full property management and host integration.",
+    "download_url": "https://play.google.com/store/apps/details?id=com.360ghar.short_stays",
+    "is_mandatory": false,
+    "is_active": true,
+    "min_supported_version": null
+  },
+  {
+    "app": "360ghar_short_stays",
+    "platform": "web",
+    "version": "1.0.0",
+    "build_number": null,
+    "release_notes": "Initial release of 360Ghar Short Stays web platform. Complete booking experience with host dashboard and property management.",
+    "download_url": "https://stays.360ghar.com",
+    "is_mandatory": false,
+    "is_active": true,
+    "min_supported_version": null
+  }
+]

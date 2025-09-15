@@ -10,8 +10,8 @@ from app.schemas.user import User as UserSchema
 from app.schemas.core import (
     BugReportCreate, BugReportUpdate, BugReportResponse,
     PageCreate, PageUpdate, PageResponse, PagePublicResponse,
-    AppUpdateCreate, AppUpdateUpdate, AppUpdateResponse,
-    AppUpdateCheckRequest, AppUpdateCheckResponse,
+    AppVersionCreate, AppVersionUpdate, AppVersionResponse,
+    AppVersionCheckRequest, AppVersionCheckResponse,
     FAQCreate, FAQUpdate, FAQResponse
 )
 from app.schemas.common import MessageResponse, PaginatedResponse
@@ -242,28 +242,29 @@ async def delete_page(
     return MessageResponse(message="Page deleted successfully")
 
 # ============================================================================
-# APP UPDATE ENDPOINTS
+# APP VERSION ENDPOINTS
 # ============================================================================
 
-@router.post("/updates/", response_model=AppUpdateResponse)
-async def create_app_update(
-    update_data: AppUpdateCreate,
+@router.post("/versions/", response_model=AppVersionResponse)
+async def create_app_version(
+    version_data: AppVersionCreate,
     current_user: UserSchema = Depends(get_current_admin),
     core_service: CoreService = Depends(get_core_service)
 ):
-    """Create a new app update entry (admin only)"""
-    return await core_service.create_app_update(update_data)
+    """Create a new app version entry (admin only)"""
+    return await core_service.create_app_version(version_data)
 
-@router.post("/updates/check", response_model=AppUpdateCheckResponse)
+@router.post("/versions/check", response_model=AppVersionCheckResponse)
 async def check_for_updates(
-    check_data: AppUpdateCheckRequest,
+    check_data: AppVersionCheckRequest,
     core_service: CoreService = Depends(get_core_service)
 ):
     """Check if there's an available update (public endpoint)"""
     return await core_service.check_for_updates(check_data)
 
-@router.get("/updates/", response_model=List[AppUpdateResponse])
-async def get_app_updates(
+@router.get("/versions/", response_model=List[AppVersionResponse])
+async def get_app_versions(
+    app: Optional[str] = Query(None, description="Filter by app identifier"),
     platform: Optional[str] = Query(None, description="Filter by platform"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     limit: int = Query(10, ge=1, le=100, description="Number of results"),
@@ -271,23 +272,24 @@ async def get_app_updates(
     current_user: UserSchema = Depends(get_current_admin),
     core_service: CoreService = Depends(get_core_service)
 ):
-    """Get app updates (admin only)"""
-    return await core_service.get_app_updates(
+    """Get app versions (admin only)"""
+    return await core_service.get_app_versions(
+        app=app,
         platform=platform,
         is_active=is_active,
         limit=limit,
         offset=offset
     )
 
-@router.put("/updates/{update_id}", response_model=AppUpdateResponse)
-async def update_app_update(
-    update_id: int,
-    update_data: AppUpdateUpdate,
+@router.put("/versions/{version_id}", response_model=AppVersionResponse)
+async def update_app_version(
+    version_id: int,
+    update_data: AppVersionUpdate,
     current_user: UserSchema = Depends(get_current_admin),
     core_service: CoreService = Depends(get_core_service)
 ):
-    """Update an app update entry (admin only)"""
-    return await core_service.update_app_update(update_id, update_data)
+    """Update an app version entry (admin only)"""
+    return await core_service.update_app_version(version_id, update_data)
 
 # ============================================================================
 # FAQ ENDPOINTS

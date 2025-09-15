@@ -1922,10 +1922,10 @@
       ]
     },
     {
-      "name": "📱 App Updates",
+      "name": "📱 App Versions",
       "item": [
         {
-          "name": "➕ Create App Update (Admin)",
+          "name": "➕ Create App Version (Admin)",
           "request": {
             "method": "POST",
             "header": [
@@ -1936,7 +1936,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"platform\": \"ios\",\n  \"version\": \"1.2.4\",\n  \"build_number\": 124,\n  \"release_notes\": \"Bug fixes and performance improvements\",\n  \"download_url\": \"https://apps.apple.com/app/360ghar/id123456789\",\n  \"is_mandatory\": false,\n  \"is_active\": true,\n  \"min_supported_version\": \"1.0.0\"\n}",
+              "raw": "{\n  \"app\": \"user\",\n  \"platform\": \"ios\",\n  \"version\": \"1.2.4\",\n  \"build_number\": 124,\n  \"release_notes\": \"Bug fixes and performance improvements\",\n  \"download_url\": \"https://apps.apple.com/app/360ghar/id123456789\",\n  \"is_mandatory\": false,\n  \"is_active\": true,\n  \"min_supported_version\": \"1.0.0\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1944,18 +1944,18 @@
               }
             },
             "url": {
-              "raw": "{{BASE_URL}}/api/v1/updates/",
+              "raw": "{{BASE_URL}}/api/v1/versions/",
               "host": [
                 "{{BASE_URL}}"
               ],
               "path": [
                 "api",
                 "v1",
-                "updates",
+                "versions",
                 ""
               ]
             },
-            "description": "**Admin Only**: Create a new app update entry"
+            "description": "**Admin Only**: Create a new app version entry"
           },
           "response": []
         },
@@ -1974,7 +1974,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"platform\": \"ios\",\n  \"current_version\": \"1.2.3\",\n  \"build_number\": 123\n}",
+              "raw": "{\n  \"app\": \"user\",\n  \"platform\": \"ios\",\n  \"current_version\": \"1.2.3\",\n  \"build_number\": 123\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1982,14 +1982,14 @@
               }
             },
             "url": {
-              "raw": "{{BASE_URL}}/api/v1/updates/check",
+              "raw": "{{BASE_URL}}/api/v1/versions/check",
               "host": [
                 "{{BASE_URL}}"
               ],
               "path": [
                 "api",
                 "v1",
-                "updates",
+                "versions",
                 "check"
               ]
             },
@@ -1998,19 +1998,19 @@
           "response": []
         },
         {
-          "name": "📋 List App Updates (Admin)",
+          "name": "📋 List App Versions (Admin)",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{BASE_URL}}/api/v1/updates/?limit=10&offset=0",
+              "raw": "{{BASE_URL}}/api/v1/versions/?limit=10&offset=0",
               "host": [
                 "{{BASE_URL}}"
               ],
               "path": [
                 "api",
                 "v1",
-                "updates",
+                "versions",
                 ""
               ],
               "query": [
@@ -2025,6 +2025,12 @@
                   "description": "Pagination offset"
                 },
                 {
+                  "key": "app",
+                  "value": "{{app}}",
+                  "description": "App identifier",
+                  "disabled": true
+                },
+                {
                   "key": "platform",
                   "value": "{{platform}}",
                   "disabled": true
@@ -2036,12 +2042,12 @@
                 }
               ]
             },
-            "description": "**Admin Only**: List all app updates"
+            "description": "**Admin Only**: List all app versions"
           },
           "response": []
         },
         {
-          "name": "✏️ Update App Update (Admin)",
+          "name": "✏️ Update App Version (Admin)",
           "request": {
             "method": "PUT",
             "header": [
@@ -2060,18 +2066,18 @@
               }
             },
             "url": {
-              "raw": "{{BASE_URL}}/api/v1/updates/{{target_update_id}}",
+              "raw": "{{BASE_URL}}/api/v1/versions/{{target_version_id}}",
               "host": [
                 "{{BASE_URL}}"
               ],
               "path": [
                 "api",
                 "v1",
-                "updates",
-                "{{target_update_id}}"
+                "versions",
+                "{{target_version_id}}"
               ]
             },
-            "description": "**Admin Only**: Update app update entry"
+            "description": "**Admin Only**: Update app version entry"
           },
           "response": []
         }
@@ -2361,10 +2367,10 @@
       "description": "Target page unique name"
     },
     {
-      "key": "target_update_id",
+      "key": "target_version_id",
       "value": "1",
       "type": "string",
-      "description": "Target app update ID"
+      "description": "Target app version ID"
     },
     {
       "key": "bug_status",
@@ -2382,7 +2388,13 @@
       "key": "platform",
       "value": "ios",
       "type": "string",
-      "description": "Platform for app updates (ios, android, web)"
+      "description": "Platform for app versions (ios, android, web)"
+    },
+    {
+      "key": "app",
+      "value": "user",
+      "type": "string",
+      "description": "App identifier for app versions"
     },
     {
       "key": "new_bug_id",
