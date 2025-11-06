@@ -1,12 +1,13 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import aliased
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.models.bookings import Booking
 from app.models.properties import Property
 from app.schemas.booking import BookingCreate, BookingUpdate, BookingPayment, BookingReview
 from typing import Optional
 import uuid
+from fastapi import HTTPException
 
 async def create_booking(db: AsyncSession, user_id: int, booking: BookingCreate):
     """Create a new booking"""
@@ -18,7 +19,30 @@ async def create_booking(db: AsyncSession, user_id: int, booking: BookingCreate)
     check_in = booking_data["check_in_date"]
     check_out = booking_data["check_out_date"]
     nights = (check_out - check_in).days
-    booking_data["nights"] = nights
+    if nights <= 0:
+        raise HTTPException(status_code=400, detail="Invalid date range: check-out must be after check-in")
+
+    # Calculate pricing before creating the booking
+    pricing = await calculate_pricing(
+        db,
+        booking_data["property_id"],
+        booking_data["check_in_date"],
+        booking_data["check_out_date"],
+        booking_data["guests"],
+    )
+    if isinstance(pricing, dict) and pricing.get("error"):
+        raise HTTPException(status_code=400, detail=pricing["error"]) 
+
+    booking_data["nights"] = pricing["nights"]
+    booking_data["base_amount"] = pricing["base_amount"]
+    booking_data["taxes_amount"] = pricing["taxes_amount"]
+    booking_data["service_charges"] = pricing["service_charges"]
+    booking_data["discount_amount"] = pricing.get("discount_amount", 0.0)
+    booking_data["total_amount"] = pricing["total_amount"]
+
+    # Set initial statuses
+    booking_data["booking_status"] = "pending"
+    booking_data["payment_status"] = "pending"
     
     db_booking = Booking(**booking_data)
     db.add(db_booking)
@@ -39,7 +63,7 @@ async def get_user_bookings(db: AsyncSession, user_id: int):
     bookings = result.scalars().all()
     total = len(bookings)
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Calculate counts for different statuses
     upcoming = sum(1 for b in bookings if b.check_in_date > now and b.booking_status in ["confirmed", "pending"])
@@ -56,7 +80,7 @@ async def get_user_bookings(db: AsyncSession, user_id: int):
 
 async def get_user_upcoming_bookings(db: AsyncSession, user_id: int):
     """Get upcoming bookings for a user"""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     stmt = select(Booking).where(
         Booking.user_id == user_id,
         Booking.check_in_date > now,
@@ -68,7 +92,7 @@ async def get_user_upcoming_bookings(db: AsyncSession, user_id: int):
 
 async def get_user_past_bookings(db: AsyncSession, user_id: int):
     """Get past bookings for a user"""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     stmt = select(Booking).where(
         Booking.user_id == user_id,
         Booking.check_out_date < now
@@ -101,7 +125,7 @@ async def cancel_booking(db: AsyncSession, booking_id: int, reason: str):
     
     if booking:
         booking.booking_status = "cancelled"
-        booking.cancellation_date = datetime.utcnow()
+        booking.cancellation_date = datetime.now(timezone.utc)
         booking.cancellation_reason = reason
         await db.flush()
         return True
@@ -118,7 +142,7 @@ async def process_payment(db: AsyncSession, payment_data: BookingPayment):
         booking.payment_status = "paid"
         booking.payment_method = payment_data.payment_method
         booking.transaction_id = payment_data.transaction_id
-        booking.payment_date = datetime.utcnow()
+        booking.payment_date = datetime.now(timezone.utc)
         booking.booking_status = "confirmed"
         await db.flush()
         return True
@@ -174,42 +198,59 @@ async def check_availability(db: AsyncSession, property_id: int, check_in_date: 
     return {"available": True, "max_occupancy": property_obj.max_occupancy}
 
 async def calculate_pricing(db: AsyncSession, property_id: int, check_in_date: datetime, check_out_date: datetime, guests: int):
-    """Calculate pricing for a booking"""
+    """Calculate pricing for a booking.
+
+    - Uses `daily_rate` if available, otherwise falls back to `base_price`.
+    - Computes taxes (18%) and service charges (5%).
+    - Applies `discount_amount` (currently 0.0 by default).
+    """
     stmt = select(Property).where(Property.id == property_id)
     result = await db.execute(stmt)
     property_obj = result.scalar_one_or_none()
-    
+
     if not property_obj:
         return {"error": "Property not found"}
-    
+
     nights = (check_out_date - check_in_date).days
     if nights <= 0:
         return {"error": "Invalid date range"}
-    
-    base_price = float(property_obj.daily_rate) if property_obj.daily_rate else 0.0
-    total_base = base_price * nights
-    
-    # Calculate taxes and fees (example: 18% GST + 5% service charge)
-    taxes = total_base * 0.18
-    service_charges = total_base * 0.05
-    
-    total_amount = total_base + taxes + service_charges
-    
+
+    # Choose a per-night rate: prefer daily_rate, else fall back to base_price
+    per_night_rate = property_obj.daily_rate if property_obj.daily_rate is not None else property_obj.base_price
+    per_night_rate = float(per_night_rate or 0.0)
+
+    base_amount = per_night_rate * nights
+
+    # Placeholder discount logic
+    discount_amount = 0.0
+
+    # Calculate taxes and service charges on the discounted subtotal
+    taxable_subtotal = max(base_amount - discount_amount, 0.0)
+    taxes_amount = taxable_subtotal * 0.18
+    service_charges = taxable_subtotal * 0.05
+
+    total_amount = taxable_subtotal + taxes_amount + service_charges
+
     return {
         "property_id": property_id,
+        "check_in_date": check_in_date,
+        "check_out_date": check_out_date,
+        "guests": guests,
         "nights": nights,
-        "base_amount": total_base,
-        "taxes_amount": taxes,
+        "base_amount": base_amount,
+        "taxes_amount": taxes_amount,
         "service_charges": service_charges,
+        "discount_amount": discount_amount,
         "total_amount": total_amount,
         "breakdown": {
-            "base_rate_per_night": base_price,
+            "base_rate_per_night": per_night_rate,
             "total_nights": nights,
-            "subtotal": total_base,
-            "gst_18_percent": taxes,
+            "subtotal": base_amount,
+            "discount": discount_amount,
+            "taxes_18_percent": taxes_amount,
             "service_charge_5_percent": service_charges,
-            "final_total": total_amount
-        }
+            "final_total": total_amount,
+        },
     }
 
 
@@ -230,7 +271,7 @@ async def get_all_bookings(
     offset = (page - 1) * limit
     from app.models.users import User
     Owner = aliased(User)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     base = select(Booking)
     filters = []
