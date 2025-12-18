@@ -1,7 +1,7 @@
 from typing import Dict, Callable
 from datetime import datetime, timedelta
 import time
-from fastapi import Request, status
+from fastapi import HTTPException, Request, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 import hashlib
