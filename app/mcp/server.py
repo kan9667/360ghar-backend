@@ -7,6 +7,7 @@ from mcp.server.auth.middleware.auth_context import get_access_token as get_auth
 
 from app.core.database import AsyncSessionLocal
 from app.core.auth import verify_supabase_token
+from app.core.exceptions import PropertyNotFoundException
 from app.core.logging import get_logger
 from app.mcp.errors import (
     MCPErrorCode,
@@ -311,8 +312,9 @@ async def properties_get(property_id: int, jwt: Optional[str] = None) -> Dict[st
     try:
         async for db in _get_db():
             user = await _get_user_from_jwt(db, jwt)
-            prop = await property_svc.get_property(db, input_data.property_id)
-            if not prop:
+            try:
+                prop = await property_svc.get_property(db, input_data.property_id)
+            except PropertyNotFoundException:
                 return not_found_response("Property", input_data.property_id)
             
             # Build enriched property data

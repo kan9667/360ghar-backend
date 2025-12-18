@@ -78,9 +78,17 @@ async def health_check():
         return {
             "status": overall_status,
             "database": db_status,
-            "database_url": settings.DATABASE_URL.split("@")[1]
-            if "@" in settings.DATABASE_URL
-            else "configured",
+            **(
+                {
+                    "database_url": (
+                        settings.DATABASE_URL.split("@", 1)[1]
+                        if "@" in settings.DATABASE_URL
+                        else "configured"
+                    )
+                }
+                if settings.ENVIRONMENT != "production"
+                else {}
+            ),
             "timestamp": datetime.utcnow().isoformat(),
             "version": "2.0.0",
         }
@@ -127,11 +135,18 @@ async def get_openapi_yaml():
 async def api_exception_handler(request: Request, exc: BaseAPIException):
     """Handle custom API exceptions"""
     logger.warning(f"API exception: {exc.detail} - {request.method} {request.url.path}")
+    detail_content = exc.detail
+    # Ensure message is always a string for logs/clients.
+    if isinstance(detail_content, dict):
+        message = str(detail_content.get("message") or detail_content.get("detail") or detail_content)
+    else:
+        message = str(detail_content)
     return JSONResponse(
         status_code=exc.status_code,
         content={
+            "detail": detail_content,
             "error": {
-                "message": exc.detail,
+                "message": message,
                 "type": exc.__class__.__name__,
                 "path": str(request.url),
                 "method": request.method,
@@ -149,6 +164,7 @@ async def value_error_handler(request: Request, exc: ValueError):
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
+            "detail": str(exc),
             "error": {
                 "message": str(exc),
                 "type": "ValidationError",
@@ -173,6 +189,7 @@ async def general_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
+            "detail": message,
             "error": {
                 "message": message,
                 "type": "InternalServerError",

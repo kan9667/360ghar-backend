@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.api.api_v1.endpoints.auth import get_current_active_user
+from app.api.api_v1.dependencies.auth import get_current_active_user
+from app.models.enums import UserRole
 from app.schemas.user import User as UserSchema
 from app.schemas.booking import (
     BookingCreate, BookingUpdate, Booking, BookingList, BookingCancel,
@@ -146,7 +147,7 @@ async def process_booking_payment(
     
     # Check ownership or agent permission
     if booking.user_id != current_user.id:
-        if current_user.role != 'agent':
+        if current_user.role != UserRole.agent.value:
             raise HTTPException(status_code=403, detail="Access denied")
         # Agent is allowed only if they manage the booking's user or the property's owner
         from app.models.users import User as UserModel
@@ -196,7 +197,7 @@ async def add_booking_review(
     
     # Check ownership or agent permission
     if booking.user_id != current_user.id:
-        if current_user.role != 'agent':
+        if current_user.role != UserRole.agent.value:
             raise HTTPException(status_code=403, detail="Access denied")
         # Agent is allowed only if they manage the booking's user or the property's owner
         from app.models.users import User as UserModel
@@ -230,9 +231,9 @@ async def list_all_bookings(
 ):
     """Global bookings listing. Admins see all; agents see their managed users/properties."""
     effective_agent_id = None
-    if current_user.role == 'admin':
+    if current_user.role == UserRole.admin.value:
         effective_agent_id = agent_id
-    elif current_user.role == 'agent':
+    elif current_user.role == UserRole.agent.value:
         effective_agent_id = current_user.agent_id
         if effective_agent_id is None:
             return {"bookings": [], "total": 0, "page": page, "limit": limit, "total_pages": 0}

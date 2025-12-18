@@ -5,7 +5,6 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy import select, func, and_, or_, desc
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
-from geoalchemy2 import func as geofunc
 from app.repositories.base import BaseRepository
 from app.models.properties import Property, PropertyAmenity
 from app.models.users import User
@@ -70,10 +69,10 @@ class PropertyRepository(BaseRepository[Property]):
         skip: int,
         limit: int
     ) -> List[Property]:
-        center_point = geofunc.ST_SetSRID(geofunc.ST_MakePoint(longitude, latitude), 4326)
+        center_point = func.ST_SetSRID(func.ST_MakePoint(longitude, latitude), 4326)
         stmt = select(Property)
         stmt = stmt.where(
-            geofunc.ST_DWithin(
+            func.ST_DWithin(
                 Property.location,
                 center_point,
                 radius_km * 1000  # Convert km to meters
@@ -81,7 +80,7 @@ class PropertyRepository(BaseRepository[Property]):
         )
         
         stmt = self._apply_filters(stmt, filters)
-        stmt = stmt.order_by(geofunc.ST_Distance(Property.location, center_point))
+        stmt = stmt.order_by(func.ST_Distance(Property.location, center_point))
         stmt = stmt.offset(skip).limit(limit)
         
         result = await self.session.execute(stmt)

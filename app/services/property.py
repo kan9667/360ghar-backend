@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from typing import Optional, List
 from pgvector.sqlalchemy import Vector
 from app.models.properties import Property, PropertyAmenity, Amenity
+from app.models.users import User as UserModel
 from app.schemas.property import (
     PropertyCreate,
     PropertyUpdate,
@@ -28,6 +29,7 @@ from app.core.exceptions import (
     PropertyNotFoundException,
     PropertyOwnershipError,
     InsufficientPermissionsError,
+    UserNotFoundException,
 )
 from app.models.enums import UserRole
 from app.repositories.property_repository import PropertyRepository
@@ -59,24 +61,42 @@ def _get_actor_role(actor: UserSchema) -> UserRole:
         )
         return UserRole.user
 
-async def create_property(db: AsyncSession, property_data: PropertyCreate, owner_id: int, actor: UserSchema):
-    """Create new property"""
+async def create_property(
+    db: AsyncSession,
+    property_data: PropertyCreate,
+    owner_id: int,
+    actor: UserSchema,
+) -> PropertySchema:
+    """Create a new property with basic RBAC validation."""
     logger.info(f"Creating property for owner {owner_id}, type: {property_data.property_type}")
     
     try:
+        repo = PropertyRepository(db)
+        actor_role = _get_actor_role(actor)
+
+        owner = await db.get(UserModel, owner_id)
+        if not owner:
+            raise UserNotFoundException(user_id=owner_id)
+
         # RBAC checks
-        if actor.role == 'admin':
+        if actor_role == UserRole.admin:
             pass
-        elif actor.role == 'agent':
+        elif actor_role == UserRole.agent:
             # Agent can only create for users they manage
-            from app.models.users import User as UserModel
-            owner = await db.get(UserModel, owner_id)
-            if not owner or actor.agent_id is None or owner.agent_id != actor.agent_id:
-                raise PermissionError("Agent not authorized to create property for this owner")
+            if actor.agent_id is None or owner.agent_id != actor.agent_id:
+                raise InsufficientPermissionsError(
+                    "Agent not authorized to create property for this owner",
+                    owner_id=owner_id,
+                    agent_id=actor.agent_id,
+                )
         else:
             # Regular user must be the owner
             if owner_id != actor.id:
-                raise PermissionError("Users can only create their own properties")
+                raise PropertyOwnershipError(
+                    "Users can only create their own properties",
+                    owner_id=owner_id,
+                    actor_id=actor.id,
+                )
 
         property_dict = property_data.model_dump(exclude_unset=True)
         property_dict["owner_id"] = owner_id
@@ -87,71 +107,76 @@ async def create_property(db: AsyncSession, property_data: PropertyCreate, owner
             lon = property_dict['longitude']
             property_dict['location'] = f'SRID=4326;POINT({lon} {lat})'
 
-        db_property = Property(**property_dict)
-        db.add(db_property)
-        await db.flush()
-        await db.refresh(db_property)
+        db_property = await repo.create(Property(**property_dict))
+        await PropertyCacheManager.invalidate_property_caches(db_property.id)
         
         logger.info(f"Property created successfully with ID {db_property.id}")
-        from app.schemas.property import Property as PropertySchema
         return PropertySchema.model_validate(db_property)
     except Exception as e:
         logger.error(f"Failed to create property: {str(e)}", exc_info=True)
-        # Re-raise permission errors as HTTP 403 to be handled by endpoint layer
-        if isinstance(e, PermissionError):
-            from fastapi import HTTPException, status
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
         raise
 
-async def get_property(db: AsyncSession, property_id: int):
-    """Get property with images and owner"""
+async def get_property(db: AsyncSession, property_id: int) -> PropertySchema:
+    """Get a property with images and owner."""
     logger.debug(f"Fetching property {property_id}")
     
     try:
-        stmt = select(Property).options(
-            selectinload(Property.images),
-            selectinload(Property.owner)
-        ).where(Property.id == property_id)
-        
-        result = await db.execute(stmt)
-        property_obj = result.scalar_one_or_none()
-        
-        if property_obj:
-            logger.debug(f"Property {property_id} found with {len(property_obj.images) if property_obj.images else 0} images")
-            from app.schemas.property import Property as PropertySchema
-            return PropertySchema.model_validate(property_obj)
-        else:
+        repo = PropertyRepository(db)
+        property_obj = await repo.get_property_with_owner(property_id)
+        if not property_obj:
             logger.warning(f"Property {property_id} not found")
-            return None
+            raise PropertyNotFoundException(property_id=property_id)
+
+        logger.debug(
+            "Property found",
+            extra={
+                "property_id": property_id,
+                "image_count": len(property_obj.images) if property_obj.images else 0,
+            },
+        )
+        return PropertySchema.model_validate(property_obj)
     except Exception as e:
         logger.error(f"Failed to fetch property {property_id}: {str(e)}", exc_info=True)
         raise
 
-async def update_property(db: AsyncSession, property_id: int, property_update: PropertyUpdate, actor: UserSchema):
-    """Update property"""
+async def update_property(
+    db: AsyncSession,
+    property_id: int,
+    property_update: PropertyUpdate,
+    actor: UserSchema,
+) -> PropertySchema:
+    """Update a property with RBAC enforcement."""
     logger.info(f"Updating property {property_id}")
     
     try:
-        stmt = select(Property).options(
-            selectinload(Property.images),
-            selectinload(Property.owner)
-        ).where(Property.id == property_id)
-        
-        result = await db.execute(stmt)
-        property_obj = result.scalar_one_or_none()
-        
+        repo = PropertyRepository(db)
+        property_obj = await repo.get_property_with_owner(property_id)
         if not property_obj:
             logger.warning(f"Property {property_id} not found for update")
-            return None
+            raise PropertyNotFoundException(property_id=property_id)
+
+        actor_role = _get_actor_role(actor)
         # RBAC checks
-        if actor.role == 'admin':
+        if actor_role == UserRole.admin:
             pass
-        elif actor.role == 'agent':
-            if actor.agent_id is None or property_obj.owner.agent_id != actor.agent_id:
-                raise PermissionError("Agent not authorized to modify this property")
+        elif actor_role == UserRole.agent:
+            if (
+                actor.agent_id is None
+                or not getattr(property_obj, "owner", None)
+                or property_obj.owner.agent_id != actor.agent_id
+            ):
+                raise InsufficientPermissionsError(
+                    "Agent not authorized to modify this property",
+                    property_id=property_id,
+                    agent_id=actor.agent_id,
+                )
         else:
             if property_obj.owner_id != actor.id:
-                raise PermissionError("Users can only modify their own properties")
+                raise PropertyOwnershipError(
+                    property_id=property_id,
+                    owner_id=property_obj.owner_id,
+                    actor_id=actor.id,
+                )
         
         update_data = property_update.model_dump(exclude_unset=True)
 
@@ -167,48 +192,55 @@ async def update_property(db: AsyncSession, property_id: int, property_update: P
         
         await db.flush()
         await db.refresh(property_obj)
+        await PropertyCacheManager.invalidate_property_caches(property_id)
         
         logger.info(f"Property {property_id} updated successfully")
-        from app.schemas.property import Property as PropertySchema
         return PropertySchema.model_validate(property_obj)
     except Exception as e:
         logger.error(f"Failed to update property {property_id}: {str(e)}", exc_info=True)
-        if isinstance(e, PermissionError):
-            from fastapi import HTTPException, status
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
         raise
 
-async def delete_property(db: AsyncSession, property_id: int, actor: UserSchema):
-    """Delete property"""
+async def delete_property(db: AsyncSession, property_id: int, actor: UserSchema) -> bool:
+    """Delete a property with RBAC enforcement."""
     logger.info(f"Deleting property {property_id}")
     
     try:
-        stmt = select(Property).options(selectinload(Property.owner)).where(Property.id == property_id)
-        result = await db.execute(stmt)
-        property_obj = result.scalar_one_or_none()
-        
-        if property_obj:
-            # RBAC checks
-            if actor.role == 'admin':
-                pass
-            elif actor.role == 'agent':
-                if actor.agent_id is None or property_obj.owner.agent_id != actor.agent_id:
-                    raise PermissionError("Agent not authorized to delete this property")
-            else:
-                if property_obj.owner_id != actor.id:
-                    raise PermissionError("Users can only delete their own properties")
-            await db.delete(property_obj)
-            await db.flush()
-            logger.info(f"Property {property_id} deleted successfully")
-            return True
-        else:
+        repo = PropertyRepository(db)
+        property_obj = await repo.get_property_with_owner(property_id)
+        if not property_obj:
             logger.warning(f"Property {property_id} not found for deletion")
-            return False
+            raise PropertyNotFoundException(property_id=property_id)
+
+        actor_role = _get_actor_role(actor)
+        # RBAC checks
+        if actor_role == UserRole.admin:
+            pass
+        elif actor_role == UserRole.agent:
+            if (
+                actor.agent_id is None
+                or not getattr(property_obj, "owner", None)
+                or property_obj.owner.agent_id != actor.agent_id
+            ):
+                raise InsufficientPermissionsError(
+                    "Agent not authorized to delete this property",
+                    property_id=property_id,
+                    agent_id=actor.agent_id,
+                )
+        else:
+            if property_obj.owner_id != actor.id:
+                raise PropertyOwnershipError(
+                    property_id=property_id,
+                    owner_id=property_obj.owner_id,
+                    actor_id=actor.id,
+                )
+
+        await db.delete(property_obj)
+        await db.flush()
+        await PropertyCacheManager.invalidate_property_caches(property_id)
+        logger.info(f"Property {property_id} deleted successfully")
+        return True
     except Exception as e:
         logger.error(f"Failed to delete property {property_id}: {str(e)}", exc_info=True)
-        if isinstance(e, PermissionError):
-            from fastapi import HTTPException, status
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
         raise
 
 async def get_unified_properties_optimized(
@@ -222,6 +254,25 @@ async def get_unified_properties_optimized(
     logger.info(f"Searching properties for user {user_id}, page {page}, limit {limit}, filters: {filters}")
     
     try:
+        cache_filters = filters.model_dump(exclude_none=True, mode="json")
+        cache_user_id = user_id or 0
+        should_cache = user_id is None
+        if should_cache:
+            cached = await PropertyCacheManager.get_cached_properties(
+                cache_filters, cache_user_id, page, limit
+            )
+            if cached:
+                try:
+                    cached_items = [
+                        PropertySchema.model_validate(item)
+                        for item in cached.get("items", [])
+                    ]
+                    return {**cached, "items": cached_items}
+                except Exception as cache_exc:  # noqa: BLE001
+                    logger.warning(
+                        "Ignoring invalid property search cache: %s", cache_exc
+                    )
+
         skip = (page - 1) * limit
         
         # Base query with eager loading
@@ -248,7 +299,7 @@ async def get_unified_properties_optimized(
         # Location-based search
         user_location = None
         distance = None
-        if filters.latitude and filters.longitude and filters.radius_km:
+        if filters.latitude is not None and filters.longitude is not None and filters.radius_km:
             logger.debug(f"Adding location filter: {filters.latitude}, {filters.longitude}, radius: {filters.radius_km}km")
             
             # Create a point from the user's location, ensuring SRID is set
@@ -462,7 +513,11 @@ async def get_unified_properties_optimized(
         if semantic_enabled and sort_by in (SortBy.distance, SortBy.newest):
             sort_by = SortBy.relevance
         if sort_by is None:
-            sort_by = SortBy.distance if (filters.latitude and filters.longitude) else SortBy.newest
+            sort_by = (
+                SortBy.distance
+                if (filters.latitude is not None and filters.longitude is not None)
+                else SortBy.newest
+            )
         
         if sort_by == SortBy.distance and distance is not None:
             query = query.order_by(distance)
@@ -525,12 +580,27 @@ async def get_unified_properties_optimized(
         
         # Calculate total pages
         total_pages = (total_count + limit - 1) // limit
-        
-        return {
+
+        result_payload = {
             "items": property_list,
             "total": total_count,
             "total_pages": total_pages
         }
+
+        if should_cache:
+            try:
+                cache_payload = {
+                    "items": [p.model_dump(mode="json") for p in property_list],
+                    "total": total_count,
+                    "total_pages": total_pages,
+                }
+                await PropertyCacheManager.cache_properties(
+                    cache_filters, cache_user_id, page, limit, cache_payload, ttl=60
+                )
+            except Exception as cache_exc:  # noqa: BLE001
+                logger.warning("Failed to cache property search: %s", cache_exc)
+
+        return result_payload
     except Exception as e:
         logger.error(f"Failed to search properties: {str(e)}", exc_info=True)
         raise

@@ -4,8 +4,8 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from app.core.database import get_db
-from app.api.api_v1.endpoints.auth import get_current_active_user
-from app.api.api_v1.dependencies.auth import get_current_admin
+from app.api.api_v1.dependencies.auth import get_current_active_user, get_current_admin
+from app.models.enums import UserRole
 from app.schemas.user import User as UserSchema
 from app.schemas.core import (
     BugReportCreate, BugReportUpdate, BugReportResponse,
@@ -116,7 +116,7 @@ async def get_bug_reports(
         raise HTTPException(status_code=400, detail="Invalid bug type")
 
     # If not admin, only show user's own bug reports
-    if current_user.role != "admin":
+    if current_user.role != UserRole.admin.value:
         user_id = current_user.id
     else:
         user_id = None
@@ -139,7 +139,7 @@ async def get_bug_report(
     bug_report = await core_service.get_bug_report_by_id(bug_id)
 
     # Check permissions - users can only see their own bugs unless they're admin
-    if current_user.role != "admin" and bug_report.user_id != current_user.id:
+    if current_user.role != UserRole.admin.value and bug_report.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to view this bug report")
 
     return bug_report
@@ -156,7 +156,7 @@ async def update_bug_report(
     bug_report = await core_service.get_bug_report_by_id(bug_id)
 
     # Only allow status and assignment updates for non-admin users
-    if current_user.role != "admin":
+    if current_user.role != UserRole.admin.value:
         if bug_report.user_id != current_user.id:
             raise HTTPException(status_code=403, detail="Not authorized to update this bug report")
 

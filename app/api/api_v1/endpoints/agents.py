@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any, Optional
 from app.core.database import get_db
-from app.api.api_v1.endpoints.auth import get_current_active_user
+from app.api.api_v1.dependencies.auth import get_current_active_user
 from app.api.api_v1.dependencies.auth import get_current_admin, get_current_agent
 from app.schemas.user import User as UserSchema
 from app.schemas.agent import (

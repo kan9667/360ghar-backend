@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
-from app.api.api_v1.endpoints.auth import get_current_user_optional
+from app.api.api_v1.dependencies.auth import get_current_user_optional
 from app.core.database import get_db
 from app.api.api_v1.dependencies.auth import get_current_admin, get_current_active_user
 from app.schemas.user import User as UserSchema

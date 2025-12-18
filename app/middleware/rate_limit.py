@@ -1,12 +1,11 @@
-from typing import Dict, Optional, Callable
+from typing import Dict, Callable
 from datetime import datetime, timedelta
 import time
-from fastapi import Request, HTTPException, status
+from fastapi import Request, status
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 import hashlib
 from app.core.cache import cache_manager
-from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -28,7 +27,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     
     async def dispatch(self, request: Request, call_next):
         # Skip rate limiting for health checks
-        if request.url.path in ["/health", "/", "/docs", "/redoc"]:
+        if self._is_exempt_path(request.url.path):
             return await call_next(request)
         
         # Get client identifier
@@ -36,10 +35,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         
         # Check rate limit
         if not await self.check_rate_limit(client_id, request.url.path):
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Rate limit exceeded",
-                headers={"Retry-After": str(self.period)}
+                content={"detail": "Rate limit exceeded"},
+                headers={
+                    "Retry-After": str(self.period),
+                    "X-RateLimit-Limit": str(self.calls),
+                    "X-RateLimit-Period": str(self.period),
+                },
             )
         
         # Process request
@@ -50,6 +53,27 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         response.headers["X-RateLimit-Period"] = str(self.period)
         
         return response
+
+    def _is_exempt_path(self, path: str) -> bool:
+        """Return True for endpoints that should not be rate limited."""
+        exempt_paths = {
+            "/",
+            "/health",
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            "/openapi.yaml",
+        }
+        if path in exempt_paths:
+            return True
+
+        # FastAPI docs are served under settings.API_V1_STR (e.g. /api/v1/docs)
+        if path.endswith("/docs") or path.endswith("/redoc"):
+            return True
+        if path.endswith("/openapi.json") or path.endswith("/openapi.yaml"):
+            return True
+
+        return False
     
     def get_client_id(self, request: Request) -> str:
         """Get unique client identifier"""
@@ -62,7 +86,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if forwarded:
             ip = forwarded.split(",")[0]
         else:
-            ip = request.client.host
+            ip = request.client.host if request.client else "unknown"
         
         return f"ip:{ip}"
     

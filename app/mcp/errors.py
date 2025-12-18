@@ -5,7 +5,7 @@ Provides standardized error handling and response formats for all MCP tools.
 """
 from enum import Enum
 from typing import Any, Dict, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class MCPErrorCode(str, Enum):
@@ -48,9 +48,8 @@ class MCPError(BaseModel):
     code: MCPErrorCode
     message: str
     details: Optional[Dict[str, Any]] = None
-    
-    class Config:
-        use_enum_values = True
+
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class MCPResponse(BaseModel):

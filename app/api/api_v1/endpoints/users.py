@@ -1,8 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
-from app.api.api_v1.endpoints.auth import get_current_active_user
-from app.api.api_v1.dependencies.auth import get_current_admin, get_current_agent
+from app.api.api_v1.dependencies.auth import (
+    get_current_active_user,
+    get_current_admin,
+    get_current_agent,
+)
+from app.models.enums import UserRole
 from app.schemas.user import UserUpdate, User as UserSchema, UserPreferences, LocationUpdate
 from app.schemas.common import (
     MessageResponse,
@@ -165,9 +169,9 @@ async def list_users(
     """List users. Admins see all (optionally filter by agent). Agents see their assigned users."""
     # Resolve effective agent filter based on role
     effective_agent_id = None
-    if current_user.role == 'admin':
+    if current_user.role == UserRole.admin.value:
         effective_agent_id = agent_id
-    elif current_user.role == 'agent':
+    elif current_user.role == UserRole.agent.value:
         effective_agent_id = current_user.agent_id
         if effective_agent_id is None:
             # Agents without linked agent profile manage nobody
@@ -209,9 +213,9 @@ async def get_user_details(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     # Authorization
-    if current_user.role == 'admin':
+    if current_user.role == UserRole.admin.value:
         pass
-    elif current_user.role == 'agent':
+    elif current_user.role == UserRole.agent.value:
         if current_user.agent_id is None or user.agent_id != current_user.agent_id:
             raise HTTPException(status_code=403, detail="Access denied")
     else:

@@ -4,6 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from typing import Optional, Dict, Any, List, Tuple
 from fastapi import HTTPException, status
 from app.models.users import User
+from app.models.enums import UserRole
 from app.schemas.user import UserUpdate
 from app.core.logging import get_logger
 
@@ -191,7 +192,7 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, a
 
         # RBAC: if an actor is provided and actor is an agent updating other users,
         # restrict to safe fields only
-        if actor is not None and actor.role == 'agent' and actor.id != user_id:
+        if actor is not None and actor.role == UserRole.agent.value and actor.id != user_id:
             # Ensure the agent is assigned to this user
             if actor.agent_id is None or user.agent_id != actor.agent_id:
                 raise HTTPException(

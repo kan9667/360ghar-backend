@@ -3,7 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.api.api_v1.endpoints.auth import get_current_active_user, get_current_user_optional
+from app.api.api_v1.dependencies.auth import get_current_active_user, get_current_user_optional
+from app.models.enums import UserRole
 from app.schemas.user import User as UserSchema
 from app.schemas.blog import (
     BlogPostCreate, BlogPostUpdate, BlogPost, BlogPostListResponse,
@@ -52,7 +53,7 @@ async def list_posts(
     """List blog posts with filters for categories, tags, and text search."""
     try:
         all_tags = (tags or []) + (keywords or [])
-        is_admin = bool(current_user and getattr(current_user, "role", None) == "admin")
+        is_admin = bool(current_user and getattr(current_user, "role", None) == UserRole.admin.value)
         items, total = await list_blog_posts(
             db,
             q=q,
@@ -84,7 +85,7 @@ async def get_post(
     current_user: Optional[UserSchema] = Depends(get_current_user_optional),
 ):
     """Get a specific blog post by ID or slug. Public endpoint."""
-    is_admin = bool(current_user and getattr(current_user, "role", None) == "admin")
+    is_admin = bool(current_user and getattr(current_user, "role", None) == UserRole.admin.value)
     post = await get_blog_post(db, identifier, include_inactive=is_admin)
     if not post:
         raise HTTPException(status_code=404, detail="Blog post not found")

@@ -3,9 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 from app.core.database import get_db
 from app.core.logging import get_logger
-from app.api.api_v1.endpoints.auth import get_current_active_user, get_current_user_optional
+from app.api.api_v1.dependencies.auth import get_current_active_user, get_current_user_optional
 from app.schemas.user import User as UserSchema
-from app.models.enums import PropertyType, PropertyPurpose
+from app.models.enums import PropertyType, PropertyPurpose, UserRole
 from app.schemas.property import (
     PropertyCreate, PropertyUpdate, Property, PropertyFilter,
     PropertyInterest, UnifiedPropertyFilter, UnifiedPropertyResponse, SortBy
@@ -134,7 +134,7 @@ async def create_new_property(
         target_owner_id = current_user.id
         if owner_id is not None:
             # Only admins/agents may specify owner_id
-            if current_user.role in ('admin', 'agent'):
+            if current_user.role in (UserRole.admin.value, UserRole.agent.value):
                 target_owner_id = owner_id
             else:
                 raise HTTPException(status_code=403, detail="Only admins or agents can set owner_id")
@@ -245,9 +245,6 @@ async def get_property_details(
     """Get property details"""
     property_data = await get_property(db, property_id)
     
-    if not property_data:
-        raise HTTPException(status_code=404, detail="Property not found")
-    
     # Increment view count
     await increment_property_view_count(db, property_id)
 
@@ -278,12 +275,7 @@ async def update_property_details(
     current_user: UserSchema = Depends(get_current_active_user)
 ):
     """Update property details"""
-    updated_property = await update_property(db, property_id, property_update, current_user)
-    
-    if not updated_property:
-        raise HTTPException(status_code=404, detail="Property not found")
-    
-    return updated_property
+    return await update_property(db, property_id, property_update, current_user)
 
 @router.delete("/{property_id}/")
 async def delete_property_endpoint(
@@ -292,9 +284,5 @@ async def delete_property_endpoint(
     current_user: UserSchema = Depends(get_current_active_user)
 ):
     """Delete a property"""
-    success = await delete_property(db, property_id, current_user)
-    
-    if not success:
-        raise HTTPException(status_code=404, detail="Property not found")
-    
+    await delete_property(db, property_id, current_user)
     return {"message": "Property deleted successfully"}

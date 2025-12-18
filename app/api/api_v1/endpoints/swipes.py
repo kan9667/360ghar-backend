@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 from app.core.database import get_db
-from app.api.api_v1.endpoints.auth import get_current_active_user
+from app.api.api_v1.dependencies.auth import get_current_active_user
 from app.schemas.property import PropertySwipe, UnifiedPropertyFilter, UnifiedPropertyResponse, SortBy, SwipeHistoryResponse
 from app.schemas.user import User as UserSchema
 from app.models.enums import PropertyType, PropertyPurpose

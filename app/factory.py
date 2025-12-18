@@ -155,12 +155,6 @@ def create_app(testing: bool = False) -> FastAPI:
         max_age=86400,
     )
 
-    # Add request ID tracking for debugging
-    app.add_middleware(RequestIDMiddleware)
-
-    # Add security headers
-    app.add_middleware(SecurityHeadersMiddleware)
-
     # Add global rate limiting (works with or without Redis)
     if not testing:
         app.add_middleware(
@@ -169,6 +163,12 @@ def create_app(testing: bool = False) -> FastAPI:
             period=60,
             scope="global"
         )
+
+    # Add security headers
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    # Add request ID tracking for debugging (outermost)
+    app.add_middleware(RequestIDMiddleware)
 
     app.include_router(api_router, prefix=settings.API_V1_STR)
 

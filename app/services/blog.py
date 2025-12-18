@@ -4,6 +4,7 @@ from sqlalchemy.orm import selectinload
 from typing import Optional, List, Tuple
 from app.core.logging import get_logger
 from app.models.blogs import BlogPost, BlogCategory, BlogTag, BlogPostCategory, BlogPostTag
+from app.models.enums import UserRole
 
 logger = get_logger(__name__)
 
@@ -74,7 +75,7 @@ async def _get_or_create_tags(db: AsyncSession, identifiers: List[str]) -> List[
 async def create_blog_post(db: AsyncSession, data, actor) -> "app.schemas.blog.BlogPost":
     from app.schemas.blog import BlogPost as BlogPostSchema
 
-    if actor.role != "admin":
+    if actor.role != UserRole.admin.value:
         from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can create blog posts")
 
@@ -410,7 +411,7 @@ async def update_blog_post(db: AsyncSession, identifier: str, data, actor) -> "a
     """Update blog post by ID or slug."""
     from app.schemas.blog import BlogPost as BlogPostSchema
 
-    if actor.role != "admin":
+    if actor.role != UserRole.admin.value:
         from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can update blog posts")
 
@@ -497,7 +498,7 @@ async def update_blog_post(db: AsyncSession, identifier: str, data, actor) -> "a
 
 async def delete_blog_post(db: AsyncSession, identifier: str, actor) -> bool:
     """Delete blog post by ID or slug."""
-    if actor.role != "admin":
+    if actor.role != UserRole.admin.value:
         from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can delete blog posts")
 

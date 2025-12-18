@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_db
-from app.api.api_v1.endpoints.auth import get_current_active_user
+from app.api.api_v1.dependencies.auth import get_current_active_user
 from app.api.api_v1.dependencies.auth import get_current_admin, get_current_agent
+from app.models.enums import UserRole
 from app.schemas.user import User as UserSchema
 from app.schemas.visit import (
     VisitCreate, VisitUpdate, Visit, VisitList, VisitReschedule, VisitCancel, VisitSlice
@@ -134,9 +135,9 @@ async def list_all_visits(
 ):
     """Global visits listing. Admins see all; agents see their managed users/properties."""
     effective_agent_id = None
-    if current_user.role == 'admin':
+    if current_user.role == UserRole.admin.value:
         effective_agent_id = agent_id
-    elif current_user.role == 'agent':
+    elif current_user.role == UserRole.agent.value:
         effective_agent_id = current_user.agent_id
         if effective_agent_id is None:
             return {"items": [], "total": 0, "page": page, "limit": limit, "total_pages": 0, "has_next": False, "has_prev": page > 1}
@@ -167,9 +168,9 @@ async def complete_visit(
         raise HTTPException(status_code=404, detail="Visit not found")
 
     # Authorization: admin or agent managing the user/property
-    if current_user.role == 'admin':
+    if current_user.role == UserRole.admin.value:
         pass
-    elif current_user.role == 'agent':
+    elif current_user.role == UserRole.agent.value:
         # Agent must manage either the visiting user or the property owner
         # Need to check ownership
         from app.models.properties import Property

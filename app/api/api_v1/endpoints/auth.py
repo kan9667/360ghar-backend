@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.auth import get_supabase_auth_client, verify_supabase_token, admin_find_user_by_phone
@@ -6,104 +6,9 @@ from app.core.logging import get_logger
 from app.schemas.user import UserCreate, UserLogin, User as UserSchema
 from app.services.user import get_or_create_user_from_supabase
 import anyio
-from typing import Optional
 
 router = APIRouter()
 logger = get_logger(__name__)
-
-async def get_current_user(
-    authorization: str = Header(None),
-    db: AsyncSession = Depends(get_db)
-) -> UserSchema:
-    """Get current user from token"""
-    if not authorization:
-        logger.debug("Authorization header missing")
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "code": "AUTH_HEADER_MISSING",
-                "message": "Authorization header missing",
-            },
-        )
-    
-    try:
-        scheme, token = authorization.split()
-        if scheme.lower() != "bearer":
-            logger.warning("Invalid authentication scheme")
-            raise HTTPException(
-                status_code=401,
-                detail={
-                    "code": "INVALID_AUTH_SCHEME",
-                    "message": "Invalid authentication scheme. Use Bearer.",
-                },
-            )
-    except ValueError:
-        logger.warning("Invalid authorization header format")
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "code": "INVALID_AUTH_HEADER",
-                "message": "Invalid authorization header format",
-            },
-        )
-    
-    try:
-        supabase_user_data = await verify_supabase_token(token)
-        if not supabase_user_data:
-            logger.warning("Invalid or expired token")
-            raise HTTPException(
-                status_code=401,
-                detail={
-                    "code": "TOKEN_INVALID",
-                    "message": "Invalid or expired token",
-                },
-            )
-        
-        db_user = await get_or_create_user_from_supabase(db, supabase_user_data)
-        logger.debug(f"User authenticated successfully: {db_user.id}")
-        return db_user
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Authentication error: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "code": "AUTHENTICATION_FAILED",
-                "message": "Authentication failed",
-            },
-        )
-
-async def get_current_active_user(current_user: UserSchema = Depends(get_current_user)) -> UserSchema:
-    if not current_user.is_active:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "USER_INACTIVE",
-                "message": "Inactive user",
-            },
-        )
-    return current_user
-
-async def get_current_user_optional(
-    authorization: str = Header(None),
-    db: AsyncSession = Depends(get_db)
-) -> Optional[UserSchema]:
-    if not authorization:
-        return None
-    
-    try:
-        scheme, token = authorization.split()
-        if scheme.lower() != "bearer":
-            return None
-        
-        supabase_user_data = await verify_supabase_token(token)
-        if supabase_user_data:
-            return await get_or_create_user_from_supabase(db, supabase_user_data)
-    except Exception:
-        pass
-    
-    return None
 
 @router.post("/login/")
 async def login(user_login: UserLogin, db: AsyncSession = Depends(get_db)):
