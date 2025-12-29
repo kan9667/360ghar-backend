@@ -1,0 +1,2596 @@
+{
+  "info": {
+    "_postman_id": "360ghar-property-management-collection",
+    "name": "360Ghar Property Management (PM) API",
+    "description": "Postman collection for the **Property Management** flows built on top of the 360Ghar backend.\n\nBase Paths:\n- Auth: `/api/v1/auth/*`\n- Property Management: `/api/v1/pm/*`\n- Public rental applications: `/api/v1/pm/public/*`\n\n## Quick Start\n1) Import this collection.\n2) Import `docs/postman/property-management-environment.json` (or use your existing env and add the variables).\n3) Set `BASE_URL` (example: `http://localhost:8000`).\n4) Run **00 - Setup & Auth → Login (Phone+Password)** (or OTP verify).\n5) Follow the folders in order (properties → applications → lease → rent/expenses/maintenance/docs/inspections → reports).\n\n## Notes\n- MVP is **manual-first**: no payment gateway; rent payments are recorded manually (cash/transfer/check).\n- No vendor module: maintenance work orders are handled by Owner/RM.\n- Many endpoints have an optional `owner_id` scope for **agent/admin**. Owners should leave `owner_id` empty/disabled.\n- File upload requests (`/pm/documents/upload`) require selecting a local file in Postman.\n",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "360ghar"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Global pre-request script",
+          "pm.environment.set('request_id', pm.variables.replaceIn('{{$guid}}'));",
+          "pm.environment.set('timestamp', new Date().toISOString());",
+          "",
+          "// Optional: clear expired token (heuristic based on token_expiry)",
+          "const tokenExpiry = pm.environment.get('token_expiry');",
+          "if (tokenExpiry) {",
+          "  const now = Date.now();",
+          "  const expiry = new Date(tokenExpiry).getTime();",
+          "  if (!Number.isNaN(expiry) && now >= expiry) {",
+          "    console.log('Token expired (token_expiry), please login again');",
+          "    pm.environment.unset('access_token');",
+          "  }",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "00 - Setup & Auth",
+      "description": "Authenticate and initialize common variables.\n\nRecommended:\n- Use Login (phone+password) for local/dev\n- Use OTP only if Supabase OTP is configured for your project\n\nAfter successful auth, `access_token` and `current_user_id` are saved into the active environment.",
+      "item": [
+        {
+          "name": "Login (Phone+Password)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json();",
+                  "  if (data.access_token) {",
+                  "    pm.environment.set('access_token', data.access_token);",
+                  "    const expiry = new Date(Date.now() + 30 * 60 * 1000);",
+                  "    pm.environment.set('token_expiry', expiry.toISOString());",
+                  "  }",
+                  "  if (data.user && data.user.id) {",
+                  "    pm.environment.set('current_user_id', data.user.id);",
+                  "    // Default PM owner id to current user if not already set (useful when logging in as owner)",
+                  "    if (!pm.environment.get('pm_owner_id')) {",
+                  "      pm.environment.set('pm_owner_id', data.user.id);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{test_phone}}\",\n  \"password\": \"{{test_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/auth/login/",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login",
+                ""
+              ]
+            },
+            "description": "Logs in using Supabase password auth.\n\nSaves:\n- `access_token`\n- `current_user_id`\n- `pm_owner_id` (if unset)\n"
+          },
+          "response": []
+        },
+        {
+          "name": "OTP Request (Phone)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{test_phone}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/auth/otp/request",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "otp",
+                "request"
+              ]
+            },
+            "description": "Requests an OTP for phone login.\n\nRequires Supabase OTP configuration."
+          },
+          "response": []
+        },
+        {
+          "name": "OTP Verify (Phone)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json();",
+                  "  if (data.access_token) {",
+                  "    pm.environment.set('access_token', data.access_token);",
+                  "    const expiry = new Date(Date.now() + 30 * 60 * 1000);",
+                  "    pm.environment.set('token_expiry', expiry.toISOString());",
+                  "  }",
+                  "  if (data.user && data.user.id) {",
+                  "    pm.environment.set('current_user_id', data.user.id);",
+                  "    if (!pm.environment.get('pm_owner_id')) {",
+                  "      pm.environment.set('pm_owner_id', data.user.id);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{test_phone}}\",\n  \"token\": \"{{otp}}\",\n  \"type\": \"sms\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/auth/otp/verify",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "otp",
+                "verify"
+              ]
+            },
+            "description": "Verifies OTP and returns a bearer token.\n\nSet `otp` in the environment before running."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Current User Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const user = pm.response.json();",
+                  "  if (user && user.id) {",
+                  "    pm.environment.set('current_user_id', user.id);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/users/profile/",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "profile",
+                ""
+              ]
+            },
+            "description": "Validates the bearer token and returns the current user profile."
+          },
+          "response": []
+        },
+        {
+          "name": "Helper: List Available Agents (pick pm_agent_id)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const data = pm.response.json();",
+                  "  const items = data && data.items;",
+                  "  if (Array.isArray(items) && items.length > 0 && items[0].id) {",
+                  "    pm.environment.set('pm_agent_id', items[0].id);",
+                  "    console.log('pm_agent_id set to', items[0].id);",
+                  "  } else {",
+                  "    console.log('No agents returned. Ensure agents exist in DB and are active/available.');",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/agents/available/?page=1&limit=20",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "agents",
+                "available",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Lists available agents (existing 360Ghar endpoint) and saves `pm_agent_id` from the first result.\n\nIf you want a specific agent, pick the id from the response and set `pm_agent_id` manually."
+          },
+          "response": []
+        },
+        {
+          "name": "Tenant: List My Charges (as_tenant=true)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/rent/charges?as_tenant=true&limit=50&offset=0",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "rent",
+                "charges"
+              ],
+              "query": [
+                {
+                  "key": "as_tenant",
+                  "value": "true"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Tenant view: list charges for the logged-in tenant user.\n\nPre-req:\n- Login as tenant (or use a tenant token)\n- Lease must have `tenant_user_id` set to this user and be `active`"
+          },
+          "response": []
+        },
+        {
+          "name": "Tenant: Payment Intent (I Paid) + optional receipt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"charge_id\": {{pm_charge_id}},\n  \"amount_paid\": 30000,\n  \"paid_at\": null,\n  \"payment_method\": \"bank_transfer\",\n  \"reference\": \"UTR-TENANT-123\",\n  \"notes\": \"Paid via bank transfer\",\n  \"receipt_document_id\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/rent/charges/{{pm_charge_id}}/tenant-payment-intent",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "rent",
+                "charges",
+                "{{pm_charge_id}}",
+                "tenant-payment-intent"
+              ]
+            },
+            "description": "Tenant flow: mark a charge as paid (manual intent) with optional receipt.\n\nImportant:\n- This endpoint currently validates a body that includes `charge_id` even though the path also includes it.\n\nPre-req:\n- Login as tenant\n- `pm_charge_id` must belong to this tenant user"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "01 - PM Dashboard",
+      "description": "Owner/RM dashboard metrics and activity feed.",
+      "item": [
+        {
+          "name": "Dashboard Overview (Owner)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/dashboard/overview",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "dashboard",
+                "overview"
+              ]
+            },
+            "description": "Returns computed dashboard KPIs for the current owner."
+          },
+          "response": []
+        },
+        {
+          "name": "Dashboard Overview (Agent/Admin → owner_id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/dashboard/overview?owner_id={{pm_owner_id}}",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "dashboard",
+                "overview"
+              ],
+              "query": [
+                {
+                  "key": "owner_id",
+                  "value": "{{pm_owner_id}}"
+                }
+              ]
+            },
+            "description": "Use this when you are logged in as agent/admin.\n\nRequires:\n- `pm_owner_id` set to the target owner user id."
+          },
+          "response": []
+        },
+        {
+          "name": "Recent Activity (Owner)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/dashboard/activity?limit=20",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "dashboard",
+                "activity"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Recent activity across rent/maintenance/leases/etc. for the current owner."
+          },
+          "response": []
+        },
+        {
+          "name": "Recent Activity (Agent/Admin → owner_id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/dashboard/activity?owner_id={{pm_owner_id}}&limit=20",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "dashboard",
+                "activity"
+              ],
+              "query": [
+                {
+                  "key": "owner_id",
+                  "value": "{{pm_owner_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Agent/admin scoped activity for a specific owner."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "02 - RM Assignment (Owner ↔ Agent)",
+      "description": "Relationship Manager assignment. Implementation reuses `users.agent_id` (no separate assignment table).",
+      "item": [
+        {
+          "name": "Assign RM (Owner self)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner_user_id\": null,\n  \"agent_id\": {{pm_agent_id}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/assignments/",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "assignments",
+                ""
+              ]
+            },
+            "description": "Assigns an RM (agent) to the currently logged-in owner.\n\nSet:\n- `pm_agent_id` (agent id) before running.\n\nNote: `owner_user_id` is ignored for owner role."
+          },
+          "response": []
+        },
+        {
+          "name": "Assign RM (Admin → owner_user_id)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner_user_id\": {{pm_owner_id}},\n  \"agent_id\": {{pm_agent_id}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/assignments/",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "assignments",
+                ""
+              ]
+            },
+            "description": "Admin-only: assign RM for a specific owner.\n\nRequires:\n- `pm_owner_id` (owner user id)\n- `pm_agent_id` (agent id)"
+          },
+          "response": []
+        },
+        {
+          "name": "List RM Assignments (Owner self)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/assignments/",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "assignments",
+                ""
+              ]
+            },
+            "description": "Lists current RM assignment for the logged-in owner."
+          },
+          "response": []
+        },
+        {
+          "name": "List RM Assignments (Admin → owner_id optional)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/assignments/?owner_id={{pm_owner_id}}",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "assignments",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "owner_id",
+                  "value": "{{pm_owner_id}}"
+                }
+              ]
+            },
+            "description": "Admin-only: list assignments. Use `owner_id` to filter."
+          },
+          "response": []
+        },
+        {
+          "name": "Update RM Assignment (PATCH /{owner_user_id})",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"agent_id\": {{pm_agent_id}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/assignments/{{pm_owner_id}}",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "assignments",
+                "{{pm_owner_id}}"
+              ]
+            },
+            "description": "Updates RM assignment for the given owner.\n\nOwner can only patch their own id. Admin can patch any owner.\n\nTo unassign, set `agent_id` to null."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 - Managed Properties",
+      "description": "Create and manage PM-enabled properties (sets `is_managed=true`).",
+      "item": [
+        {
+          "name": "Create Managed Property (Owner)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const prop = pm.response.json();",
+                  "  if (prop && prop.id) {",
+                  "    pm.environment.set('pm_property_id', prop.id);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"PM Test Property - Flat 302\",\n  \"description\": \"Managed rental property for PM flows\",\n  \"property_type\": \"apartment\",\n  \"purpose\": \"rent\",\n  \"base_price\": 30000,\n  \"city\": \"Mumbai\",\n  \"state\": \"Maharashtra\",\n  \"full_address\": \"Andheri East, Mumbai\",\n  \"monthly_rent\": 30000,\n  \"security_deposit\": 60000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/properties/?management_status=active&payment_due_day=5&grace_period_days=3",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "properties",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "management_status",
+                  "value": "active"
+                },
+                {
+                  "key": "payment_due_day",
+                  "value": "5"
+                },
+                {
+                  "key": "grace_period_days",
+                  "value": "3"
+                }
+              ]
+            },
+            "description": "Creates a managed property for the logged-in owner.\n\nSaves:\n- `pm_property_id`"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Managed Property (Agent/Admin → owner_id)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"PM Test Property (Agent) - Flat 401\",\n  \"description\": \"Managed rental property created by agent/admin\",\n  \"property_type\": \"apartment\",\n  \"purpose\": \"rent\",\n  \"base_price\": 35000,\n  \"city\": \"Bengaluru\",\n  \"state\": \"Karnataka\",\n  \"full_address\": \"HSR Layout, Bengaluru\",\n  \"monthly_rent\": 35000,\n  \"security_deposit\": 70000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/properties/?owner_id={{pm_owner_id}}&management_status=active&payment_due_day=5&grace_period_days=3",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "properties",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "owner_id",
+                  "value": "{{pm_owner_id}}"
+                },
+                {
+                  "key": "management_status",
+                  "value": "active"
+                },
+                {
+                  "key": "payment_due_day",
+                  "value": "5"
+                },
+                {
+                  "key": "grace_period_days",
+                  "value": "3"
+                }
+              ]
+            },
+            "description": "Agent/admin can create managed properties for a specific owner.\n\nRequires `pm_owner_id`."
+          },
+          "response": []
+        },
+        {
+          "name": "List Managed Properties (Owner)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/properties/?limit=50&offset=0",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "properties",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Lists managed properties accessible to the current owner."
+          },
+          "response": []
+        },
+        {
+          "name": "List Managed Properties (Agent/Admin → owner_id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/properties/?owner_id={{pm_owner_id}}&limit=50&offset=0",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "properties",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "owner_id",
+                  "value": "{{pm_owner_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Agent/admin list properties for a specific owner."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Managed Property Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/properties/{{pm_property_id}}",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "properties",
+                "{{pm_property_id}}"
+              ]
+            },
+            "description": "Returns property management detail including `active_lease` (if any).\n\nRequires `pm_property_id`."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Managed Property Settings",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_due_day\": 5,\n  \"grace_period_days\": 3,\n  \"late_fee_policy\": {\n    \"type\": \"fixed\",\n    \"amount\": 500\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/properties/{{pm_property_id}}",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "properties",
+                "{{pm_property_id}}"
+              ]
+            },
+            "description": "Updates PM-related settings (due day, grace, late fee policy).\n\nRequires `pm_property_id`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "04 - Applications (Forms + Submissions)",
+      "description": "Create rental application forms, fetch via public slug, submit applications, and approve/reject.",
+      "item": [
+        {
+          "name": "Create Application Form (Owner)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const form = pm.response.json();",
+                  "  if (form && form.id) pm.environment.set('pm_application_form_id', form.id);",
+                  "  if (form && form.slug) pm.environment.set('pm_application_slug', form.slug);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner_id\": null,\n  \"property_id\": {{pm_property_id}},\n  \"title\": \"Rental Application - Flat 302\",\n  \"description\": \"Please fill details and upload required documents.\",\n  \"application_fee_amount\": null,\n  \"required_document_types\": {\n    \"id_proof\": true,\n    \"income_proof\": true\n  },\n  \"questions\": {\n    \"employment\": {\n      \"employer_name\": {\"type\": \"text\", \"required\": true},\n      \"monthly_income\": {\"type\": \"number\", \"required\": true}\n    },\n    \"pets\": {\n      \"has_pets\": {\"type\": \"boolean\", \"required\": false}\n    }\n  },\n  \"config\": {\n    \"allow_multiple_applicants\": false\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/applications/forms",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "applications",
+                "forms"
+              ]
+            },
+            "description": "Creates an application form for a property.\n\nRequires:\n- `pm_property_id`\n\nSaves:\n- `pm_application_form_id`\n- `pm_application_slug`"
+          },
+          "response": []
+        },
+        {
+          "name": "List Application Forms (Owner)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/applications/forms?limit=50&offset=0",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "applications",
+                "forms"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Application Form (Owner/RM)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/applications/forms/{{pm_application_form_id}}",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "applications",
+                "forms",
+                "{{pm_application_form_id}}"
+              ]
+            },
+            "description": "Fetch a form by id.\n\nRequires `pm_application_form_id`."
+          },
+          "response": []
+        },
+        {
+          "name": "Public: Get Application Form by Slug",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/public/applications/{{pm_application_slug}}",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "public",
+                "applications",
+                "{{pm_application_slug}}"
+              ]
+            },
+            "description": "Public endpoint for prospects. No auth.\n\nRequires `pm_application_slug`."
+          },
+          "response": []
+        },
+        {
+          "name": "Public: Submit Application",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const app = pm.response.json();",
+                  "  if (app && app.id) pm.environment.set('pm_application_id', app.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"property_id\": {{pm_property_id}},\n  \"applicant_full_name\": \"Rohit Sharma\",\n  \"applicant_phone\": \"+919999999999\",\n  \"applicant_email\": \"rohit@example.com\",\n  \"answers\": {\n    \"employment\": {\n      \"employer_name\": \"ABC Pvt Ltd\",\n      \"monthly_income\": 90000\n    },\n    \"pets\": {\n      \"has_pets\": false\n    }\n  },\n  \"application_data\": {\n    \"rental_history\": {\n      \"last_landlord\": \"Mr. X\",\n      \"duration_months\": 18\n    }\n  },\n  \"emergency_contacts\": {\n    \"name\": \"Kiran Sharma\",\n    \"phone\": \"+919888888888\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/public/applications/{{pm_application_slug}}/submit",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "public",
+                "applications",
+                "{{pm_application_slug}}",
+                "submit"
+              ]
+            },
+            "description": "Public submission endpoint. No auth.\n\nRequires:\n- `pm_application_slug`\n- `pm_property_id`\n\nSaves:\n- `pm_application_id`"
+          },
+          "response": []
+        },
+        {
+          "name": "List Applications Inbox (Owner/RM)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/applications/?property_id={{pm_property_id}}&limit=50&offset=0",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "applications",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "property_id",
+                  "value": "{{pm_property_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "List applications for a property.\n\nRequires `pm_property_id`."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Application Detail (Owner/RM)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/applications/{{pm_application_id}}",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "applications",
+                "{{pm_application_id}}"
+              ]
+            },
+            "description": "Fetch an application by id.\n\nRequires `pm_application_id`."
+          },
+          "response": []
+        },
+        {
+          "name": "Decide Application (Approve)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"approved\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/applications/{{pm_application_id}}/decision",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "applications",
+                "{{pm_application_id}}",
+                "decision"
+              ]
+            },
+            "description": "Approves the application.\n\nValid values: `approved` or `rejected`.\n\nRequires `pm_application_id`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "05 - Leases",
+      "description": "Create, view, upload signed doc, renew, terminate.",
+      "item": [
+        {
+          "name": "Create Lease (Owner, make active)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const lease = pm.response.json();",
+                  "  if (lease && lease.id) pm.environment.set('pm_lease_id', lease.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner_id\": null,\n  \"property_id\": {{pm_property_id}},\n  \"tenant_user_id\": null,\n  \"tenant_name\": \"Rohit Sharma\",\n  \"tenant_phone\": \"+919999999999\",\n  \"tenant_email\": \"rohit@example.com\",\n  \"status\": \"active\",\n  \"start_date\": \"2025-01-01\",\n  \"end_date\": \"2025-12-31\",\n  \"monthly_rent\": 30000,\n  \"security_deposit\": 60000,\n  \"late_fee_amount\": 500,\n  \"late_fee_percentage\": null,\n  \"grace_period_days\": 3,\n  \"payment_due_day\": 5,\n  \"lease_terms\": {\n    \"notice_period_days\": 30\n  },\n  \"special_clauses\": \"No smoking. No subletting.\",\n  \"lease_document_id\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/leases/",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "leases",
+                ""
+              ]
+            },
+            "description": "Creates a lease and sets it to `active`.\n\nRequires:\n- `pm_property_id`\n\nSaves:\n- `pm_lease_id`\n\nNote: For tenant portal access, create/link a real tenant user and set `tenant_user_id`."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Lease Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/leases/{{pm_lease_id}}",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "leases",
+                "{{pm_lease_id}}"
+              ]
+            },
+            "description": "Fetch lease by id.\n\nRequires `pm_lease_id`."
+          },
+          "response": []
+        },
+        {
+          "name": "List Leases (Owner)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/leases/?property_id={{pm_property_id}}&limit=50&offset=0",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "leases",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "property_id",
+                  "value": "{{pm_property_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Upload Signed Lease (link document_id)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lease_document_id\": {{pm_lease_document_id}},\n  \"signed_by_owner\": true,\n  \"signed_by_tenant\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/leases/{{pm_lease_id}}/upload-signed",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "leases",
+                "{{pm_lease_id}}",
+                "upload-signed"
+              ]
+            },
+            "description": "Links an uploaded document (PDF) as the signed lease.\n\nRequires:\n- `pm_lease_id`\n- `pm_lease_document_id` (create via Documents → Upload Lease Agreement)"
+          },
+          "response": []
+        },
+        {
+          "name": "Renew Lease (creates new lease)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const lease = pm.response.json();",
+                  "  if (lease && lease.id) pm.environment.set('pm_lease_id', lease.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start_date\": \"2026-01-01\",\n  \"end_date\": \"2026-12-31\",\n  \"monthly_rent\": 32000,\n  \"security_deposit\": 60000,\n  \"make_active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/leases/{{pm_lease_id}}/renew",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "leases",
+                "{{pm_lease_id}}",
+                "renew"
+              ]
+            },
+            "description": "Renews a lease by creating a new lease record.\n\nIf `make_active=true`, it becomes the active lease and updates property pointers.\n\nThis request overwrites `pm_lease_id` to the new lease id."
+          },
+          "response": []
+        },
+        {
+          "name": "Terminate Lease",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/leases/{{pm_lease_id}}/terminate",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "leases",
+                "{{pm_lease_id}}",
+                "terminate"
+              ]
+            },
+            "description": "Terminates a lease. If it was the active lease, property pointers are cleared."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "06 - Rent Ledger (Charges + Payments)",
+      "description": "Generate rent charges (idempotent), list charges with totals, record payments, view payment history.",
+      "item": [
+        {
+          "name": "Generate Charges (for Lease)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner_id\": null,\n  \"lease_id\": {{pm_lease_id}},\n  \"start_month\": \"2025-01-01\",\n  \"months\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/rent/charges/generate",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "rent",
+                "charges",
+                "generate"
+              ]
+            },
+            "description": "Generates charges for an active lease. This endpoint is idempotent.\n\nRequires:\n- `pm_lease_id`"
+          },
+          "response": []
+        },
+        {
+          "name": "List Charges (by Lease) + Save first charge_id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const rows = pm.response.json();",
+                  "  if (Array.isArray(rows) && rows.length > 0 && rows[0].charge && rows[0].charge.id) {",
+                  "    pm.environment.set('pm_charge_id', rows[0].charge.id);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/rent/charges?lease_id={{pm_lease_id}}&limit=50&offset=0",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "rent",
+                "charges"
+              ],
+              "query": [
+                {
+                  "key": "lease_id",
+                  "value": "{{pm_lease_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Lists charges and computes totals.\n\nSaves:\n- `pm_charge_id` (first row)"
+          },
+          "response": []
+        },
+        {
+          "name": "Record Payment (manual)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const p = pm.response.json();",
+                  "  if (p && p.id) pm.environment.set('pm_payment_id', p.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"charge_id\": {{pm_charge_id}},\n  \"amount_paid\": 15000,\n  \"paid_at\": null,\n  \"payment_method\": \"bank_transfer\",\n  \"reference\": \"UTR123456789\",\n  \"notes\": \"Partial payment\",\n  \"receipt_document_id\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/rent/payments",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "rent",
+                "payments"
+              ]
+            },
+            "description": "Records a rent payment manually.\n\nRequires:\n- `pm_charge_id`\n\nOptional:\n- `pm_receipt_document_id` (upload a receipt in Documents first)\n\nSaves:\n- `pm_payment_id`"
+          },
+          "response": []
+        },
+        {
+          "name": "List Payments (by Lease)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/rent/payments?lease_id={{pm_lease_id}}&limit=50&offset=0",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "rent",
+                "payments"
+              ],
+              "query": [
+                {
+                  "key": "lease_id",
+                  "value": "{{pm_lease_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "07 - Expenses",
+      "description": "Record and query property expenses (manual-first).",
+      "item": [
+        {
+          "name": "Create Expense",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const e = pm.response.json();",
+                  "  if (e && e.id) pm.environment.set('pm_expense_id', e.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner_id\": null,\n  \"property_id\": {{pm_property_id}},\n  \"category\": \"maintenance\",\n  \"amount\": 1200,\n  \"expense_date\": \"2025-01-10\",\n  \"description\": \"Plumbing repair\",\n  \"notes\": \"Kitchen sink\",\n  \"receipt_document_id\": null,\n  \"is_recurring\": false,\n  \"recurrence_rule\": null,\n  \"next_due_date\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/expenses/",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "expenses",
+                ""
+              ]
+            },
+            "description": "Creates an expense linked to a property.\n\nRequires `pm_property_id`.\n\nSaves `pm_expense_id`."
+          },
+          "response": []
+        },
+        {
+          "name": "List Expenses (Owner)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/expenses/?property_id={{pm_property_id}}&limit=50&offset=0",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "expenses",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "property_id",
+                  "value": "{{pm_property_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Expense (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notes\": \"Updated note from portal\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/expenses/{{pm_expense_id}}",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "expenses",
+                "{{pm_expense_id}}"
+              ]
+            },
+            "description": "Updates an expense.\n\nRequires `pm_expense_id`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "08 - Maintenance (Requests + Work Orders)",
+      "description": "Tenant/owner submits a request; owner/RM updates work order lifecycle.",
+      "item": [
+        {
+          "name": "Create Maintenance Request (Owner or Tenant)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const r = pm.response.json();",
+                  "  if (r && r.id) pm.environment.set('pm_maintenance_request_id', r.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"property_id\": {{pm_property_id}},\n  \"category\": \"plumbing\",\n  \"urgency\": \"high\",\n  \"title\": \"Leaking tap\",\n  \"description\": \"Kitchen tap is leaking continuously\",\n  \"preferred_contact_method\": \"phone\",\n  \"availability_notes\": \"Available after 6 PM\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/maintenance/requests",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "maintenance",
+                "requests"
+              ]
+            },
+            "description": "Creates a maintenance request.\n\nRequires `pm_property_id`.\n\nSaves `pm_maintenance_request_id`."
+          },
+          "response": []
+        },
+        {
+          "name": "List Maintenance Requests (Owner)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/maintenance/requests?property_id={{pm_property_id}}&limit=50&offset=0",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "maintenance",
+                "requests"
+              ],
+              "query": [
+                {
+                  "key": "property_id",
+                  "value": "{{pm_property_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Maintenance Request (Work Order fields)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_status\": \"work_order_created\",\n  \"work_order_status\": \"assigned\",\n  \"assigned_agent_id\": null,\n  \"priority\": \"P1\",\n  \"estimated_cost\": 1500,\n  \"scheduled_for\": \"2025-01-11T18:30:00Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/maintenance/requests/{{pm_maintenance_request_id}}",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "maintenance",
+                "requests",
+                "{{pm_maintenance_request_id}}"
+              ]
+            },
+            "description": "Owner/RM updates request status, work order status, schedule, and costs.\n\nRequires `pm_maintenance_request_id`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "09 - Documents (Vault)",
+      "description": "Upload and manage documents linked to users/properties/leases/maintenance/applications.",
+      "item": [
+        {
+          "name": "Upload Document (Lease Agreement PDF)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const d = pm.response.json();",
+                  "  if (d && d.id) {",
+                  "    pm.environment.set('pm_document_id', d.id);",
+                  "    pm.environment.set('pm_lease_document_id', d.id);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "document_type",
+                  "value": "lease_agreement",
+                  "type": "text"
+                },
+                {
+                  "key": "title",
+                  "value": "Signed Lease - Flat 302",
+                  "type": "text"
+                },
+                {
+                  "key": "property_id",
+                  "value": "{{pm_property_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "lease_id",
+                  "value": "",
+                  "type": "text",
+                  "disabled": true
+                },
+                {
+                  "key": "shared_with_tenant",
+                  "value": "true",
+                  "type": "text"
+                },
+                {
+                  "key": "shared_with_agent",
+                  "value": "true",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/documents/upload",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "documents",
+                "upload"
+              ]
+            },
+            "description": "Uploads a document to Supabase storage and creates a `documents` record.\n\nAction required:\n- Select a local PDF file for the `file` field.\n\nSaves:\n- `pm_document_id`\n- `pm_lease_document_id`"
+          },
+          "response": []
+        },
+        {
+          "name": "Upload Document (Receipt / Proof)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const d = pm.response.json();",
+                  "  if (d && d.id) pm.environment.set('pm_receipt_document_id', d.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "document_type",
+                  "value": "receipt",
+                  "type": "text"
+                },
+                {
+                  "key": "title",
+                  "value": "Rent Receipt - Jan 2025",
+                  "type": "text"
+                },
+                {
+                  "key": "property_id",
+                  "value": "{{pm_property_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "shared_with_tenant",
+                  "value": "true",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/documents/upload",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "documents",
+                "upload"
+              ]
+            },
+            "description": "Uploads a receipt/proof document and saves `pm_receipt_document_id` for use in rent payment recording."
+          },
+          "response": []
+        },
+        {
+          "name": "List Documents (filter by property_id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/documents/?property_id={{pm_property_id}}&limit=50&offset=0",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "documents",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "property_id",
+                  "value": "{{pm_property_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Document (share toggles/title)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Updated Title\",\n  \"shared_with_tenant\": true,\n  \"shared_with_agent\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/documents/{{pm_document_id}}",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "documents",
+                "{{pm_document_id}}"
+              ]
+            },
+            "description": "Updates a document's title and sharing flags.\n\nRequires `pm_document_id`."
+          },
+          "response": []
+        },
+        {
+          "name": "Download Document (returns URL)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/documents/{{pm_document_id}}/download",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "documents",
+                "{{pm_document_id}}",
+                "download"
+              ]
+            },
+            "description": "Returns a download URL for the document.\n\nMVP returns `file_url` (public URL)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "10 - Inspections",
+      "description": "Move-in/move-out inspection checklists (JSON-backed).",
+      "item": [
+        {
+          "name": "Create Inspection Checklist",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  const c = pm.response.json();",
+                  "  if (c && c.id) pm.environment.set('pm_inspection_id', c.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner_id\": null,\n  \"lease_id\": {{pm_lease_id}},\n  \"inspection_type\": \"move_in\",\n  \"rooms_data\": {\n    \"living_room\": {\n      \"walls\": \"good\",\n      \"floor\": \"good\",\n      \"notes\": \"No visible damage\"\n    }\n  },\n  \"overall_notes\": \"Move-in checklist completed\",\n  \"conducted_at\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/inspections/",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "inspections",
+                ""
+              ]
+            },
+            "description": "Creates an inspection checklist.\n\nRequires `pm_lease_id`.\n\nSaves `pm_inspection_id`."
+          },
+          "response": []
+        },
+        {
+          "name": "List Inspections (by property_id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/inspections/?property_id={{pm_property_id}}&limit=50&offset=0",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "inspections",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "property_id",
+                  "value": "{{pm_property_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Inspection Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/inspections/{{pm_inspection_id}}",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "inspections",
+                "{{pm_inspection_id}}"
+              ]
+            },
+            "description": "Fetch an inspection checklist.\n\nRequires `pm_inspection_id`."
+          },
+          "response": []
+        },
+        {
+          "name": "Sign Inspection (link signature docs)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_signature_document_id\": null,\n  \"owner_signature_document_id\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/inspections/{{pm_inspection_id}}/sign",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "inspections",
+                "{{pm_inspection_id}}",
+                "sign"
+              ]
+            },
+            "description": "Links signature documents (if available) and timestamps the sign-off.\n\nPhase 2: capture signatures as docs and pass their document ids here."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "11 - Tenants (Owner/RM)",
+      "description": "Tenant directory derived from leases where `tenant_user_id` is set.\n\nTo see results here, create a lease with `tenant_user_id` pointing to an actual user record.",
+      "item": [
+        {
+          "name": "List Tenants (Owner)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/tenants/?limit=50&offset=0",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "tenants",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Tenants (Agent → owner_id required)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/tenants/?owner_id={{pm_owner_id}}&limit=50&offset=0",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "tenants",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "owner_id",
+                  "value": "{{pm_owner_id}}"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Agent must pass `owner_id`.\n\nRequires `pm_owner_id`."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Tenant Detail (requires tenant_user_id)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/tenants/{{pm_tenant_user_id}}?owner_id={{pm_owner_id}}",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "tenants",
+                "{{pm_tenant_user_id}}"
+              ],
+              "query": [
+                {
+                  "key": "owner_id",
+                  "value": "{{pm_owner_id}}",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Fetch tenant user + leases.\n\nSet `pm_tenant_user_id` to a real user id that is referenced by a lease's `tenant_user_id`.\n\nAgents must also pass `owner_id`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "12 - Reports",
+      "description": "Computed reports (rent roll, income, expenses, P&L, occupancy, maintenance).",
+      "item": [
+        {
+          "name": "Rent Roll",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/reports/rent-roll",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "reports",
+                "rent-roll"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Income Report (date range)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/reports/income?start=2025-01-01T00:00:00Z&end=2025-01-31T23:59:59Z",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "reports",
+                "income"
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "2025-01-01T00:00:00Z"
+                },
+                {
+                  "key": "end",
+                  "value": "2025-01-31T23:59:59Z"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Expense Report (date range)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/reports/expenses?start=2025-01-01&end=2025-01-31",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "reports",
+                "expenses"
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "2025-01-01"
+                },
+                {
+                  "key": "end",
+                  "value": "2025-01-31"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "P&L Report (date range)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/reports/pnl?start=2025-01-01&end=2025-01-31",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "reports",
+                "pnl"
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "2025-01-01"
+                },
+                {
+                  "key": "end",
+                  "value": "2025-01-31"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Occupancy Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/reports/occupancy",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "reports",
+                "occupancy"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Maintenance Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{BASE_URL}}/api/v1/pm/reports/maintenance",
+              "host": [
+                "{{BASE_URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "pm",
+                "reports",
+                "maintenance"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

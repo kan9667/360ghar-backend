@@ -8,9 +8,35 @@ from datetime import datetime
 from app.core.database import Base
 from app.models.enums import (
     PropertyType, PropertyPurpose, PropertyStatus, BookingStatus, PaymentStatus,
-    VisitStatus, AgentType, ExperienceLevel, BugType, BugSeverity, BugStatus, PageFormat, ImageCategory
+    VisitStatus, AgentType, ExperienceLevel, BugType, BugSeverity, BugStatus, PageFormat, ImageCategory,
+    ManagedPropertyStatus,
 )
 from geoalchemy2 import Geography
+from geoalchemy2.functions import ST_AsBinary, ST_GeogFromText
+from sqlalchemy.ext.compiler import compiles
+
+
+# GeoAlchemy2's Geography type isn't supported by SQLite (used in tests).
+# Compile it as TEXT for the SQLite dialect so Base.metadata.create_all works.
+@compiles(Geography, "sqlite")
+def _compile_geography_sqlite(_type, _compiler, **_kw):  # noqa: ANN001
+    return "TEXT"
+
+
+@compiles(ST_GeogFromText, "sqlite")
+def _compile_st_geog_from_text_sqlite(element, compiler, **kw):  # noqa: ANN001
+    clauses = list(element.clauses)
+    if not clauses:
+        return "NULL"
+    return compiler.process(clauses[0], **kw)
+
+
+@compiles(ST_AsBinary, "sqlite")
+def _compile_st_as_binary_sqlite(element, compiler, **kw):  # noqa: ANN001
+    clauses = list(element.clauses)
+    if not clauses:
+        return "NULL"
+    return compiler.process(clauses[0], **kw)
 
 class Property(Base):
     __tablename__ = "properties"
@@ -33,7 +59,10 @@ class Property(Base):
     # Location
     latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    location: Mapped[Optional[str]] = mapped_column(Geography(geometry_type='POINT', srid=4326), nullable=True)
+    location: Mapped[Optional[str]] = mapped_column(
+        Geography(geometry_type="POINT", srid=4326, spatial_index=False),
+        nullable=True,
+    )
     city: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     state: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     country: Mapped[str] = mapped_column(String, default="India")
@@ -82,6 +111,18 @@ class Property(Base):
     builder_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # Meta
+    # Property Management
+    is_managed: Mapped[bool] = mapped_column(Boolean, default=False)
+    management_status: Mapped[ManagedPropertyStatus] = mapped_column(
+        SQLEnum(ManagedPropertyStatus, name="managed_property_status"),
+        default=ManagedPropertyStatus.active,
+    )
+    payment_due_day: Mapped[int] = mapped_column(Integer, default=1)
+    grace_period_days: Mapped[int] = mapped_column(Integer, default=5)
+    late_fee_policy: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    current_lease_id: Mapped[Optional[int]] = mapped_column(ForeignKey("leases.id"), nullable=True)
+    current_tenant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
     available_from: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     calendar_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
@@ -92,12 +133,31 @@ class Property(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, onupdate=func.now(), nullable=True)
 
     # Relationships
-    owner: Mapped["User"] = relationship("User", back_populates="owned_properties")
+    owner: Mapped["User"] = relationship(
+        "User",
+        back_populates="owned_properties",
+        foreign_keys=[owner_id],
+    )
     images: Mapped[List["PropertyImage"]] = relationship(back_populates="property", cascade="all, delete-orphan")
     property_amenities: Mapped[List["PropertyAmenity"]] = relationship(back_populates="property", cascade="all, delete-orphan")
     swipes: Mapped[List["UserSwipe"]] = relationship(back_populates="property")
     visits: Mapped[List["Visit"]] = relationship(back_populates="property")
     bookings: Mapped[List["Booking"]] = relationship(back_populates="property")
+    # PM relationships (declared by name to avoid circular imports)
+    leases: Mapped[List["Lease"]] = relationship(
+        "Lease",
+        back_populates="property",
+        foreign_keys="Lease.property_id",
+    )
+    maintenance_requests: Mapped[List["MaintenanceRequest"]] = relationship(
+        "MaintenanceRequest", back_populates="property"
+    )
+    expenses: Mapped[List["Expense"]] = relationship("Expense", back_populates="property")
+    rent_charges: Mapped[List["RentCharge"]] = relationship("RentCharge", back_populates="property")
+    inspection_checklists: Mapped[List["InspectionChecklist"]] = relationship(
+        "InspectionChecklist", back_populates="property"
+    )
+    documents: Mapped[List["Document"]] = relationship("Document", back_populates="property")
 
 class PropertyImage(Base):
     __tablename__ = "property_images"

@@ -18,6 +18,22 @@ class StorageService:
     def __init__(self):
         self.supabase = get_supabase_auth_client()
         self.bucket_name = settings.SUPABASE_STORAGE_BUCKET
+        self.documents_bucket_name = settings.SUPABASE_DOCUMENTS_BUCKET
+
+        self._valid_image_types = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"}
+        self._valid_video_types = {
+            "video/mp4",
+            "video/webm",
+            "video/quicktime",
+            "video/x-matroska",
+            "video/ogg",
+        }
+        self._valid_document_types = {
+            "application/pdf",
+            # Office formats (optional; safe defaults)
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }
     
     async def upload_property_image(self, file: UploadFile, property_id: int) -> Dict[str, Any]:
         """Upload property image to Supabase Storage"""
@@ -34,16 +50,34 @@ class StorageService:
     async def upload_generic(self, file: UploadFile, folder: str = "uploads") -> Dict[str, Any]:
         """Generic upload for dashboard and misc files"""
         return await self._upload_file(file, folder, "generic")
+
+    async def upload_document(self, file: UploadFile, folder: str = "documents") -> Dict[str, Any]:
+        """Upload a document (PDF, etc.) to the documents bucket."""
+        return await self._upload_file(
+            file,
+            folder,
+            "document",
+            bucket_name=self.documents_bucket_name,
+            allow_documents=True,
+        )
     
-    async def _upload_file(self, file: UploadFile, folder: str, file_type: str) -> Dict[str, Any]:
+    async def _upload_file(
+        self,
+        file: UploadFile,
+        folder: str,
+        file_type: str,
+        *,
+        bucket_name: Optional[str] = None,
+        allow_documents: bool = False,
+    ) -> Dict[str, Any]:
         """Generic file upload method"""
         try:
             # Validate file type
-            if not self._is_valid_media(file):
+            if not self._is_valid_upload(file, allow_documents=allow_documents):
                 raise HTTPException(status_code=400, detail="Invalid file type")
             
             # Generate unique filename
-            file_extension = self._get_file_extension(file.filename)
+            file_extension = self._get_file_extension(file.filename, content_type=file.content_type)
             unique_filename = f"{uuid.uuid4()}{file_extension}"
             file_path = f"{folder}/{unique_filename}"
             
@@ -51,7 +85,8 @@ class StorageService:
             file_content = await file.read()
             
             # Upload to Supabase Storage
-            response = self.supabase.storage.from_(self.bucket_name).upload(
+            target_bucket = bucket_name or self.bucket_name
+            response = self.supabase.storage.from_(target_bucket).upload(
                 path=file_path,
                 file=file_content,
                 file_options={
@@ -66,7 +101,7 @@ class StorageService:
                 raise HTTPException(status_code=500, detail="File upload failed")
             
             # Get public URL
-            public_url = self.supabase.storage.from_(self.bucket_name).get_public_url(file_path)
+            public_url = self.supabase.storage.from_(target_bucket).get_public_url(file_path)
             
             return {
                 "file_path": file_path,
@@ -106,17 +141,29 @@ class StorageService:
             logger.error(f"File listing error: {str(e)}")
             return []
     
-    def _is_valid_media(self, file: UploadFile) -> bool:
-        """Validate if file is a supported image or video"""
-        valid_image_types = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]
-        valid_video_types = ["video/mp4", "video/webm", "video/quicktime", "video/x-matroska", "video/ogg"]
-        return file.content_type in (valid_image_types + valid_video_types)
+    def _is_valid_upload(self, file: UploadFile, *, allow_documents: bool = False) -> bool:
+        """Validate upload content types.
+
+        By default we accept images/videos (property media). For the property
+        management document vault, we also allow PDFs (and optional office docs).
+        """
+        valid = set(self._valid_image_types) | set(self._valid_video_types)
+        if allow_documents:
+            valid |= set(self._valid_document_types)
+        return file.content_type in valid
     
-    def _get_file_extension(self, filename: str) -> str:
-        """Get file extension from filename"""
-        if not filename:
-            return ".jpg"
-        return os.path.splitext(filename)[1] or ".jpg"
+    def _get_file_extension(self, filename: str, *, content_type: Optional[str] = None) -> str:
+        """Get file extension from filename, with a safe fallback by content-type."""
+        if filename:
+            ext = os.path.splitext(filename)[1]
+            if ext:
+                return ext
+
+        if content_type == "application/pdf":
+            return ".pdf"
+        if content_type in self._valid_video_types:
+            return ".mp4"
+        return ".jpg"
 
 # Global storage service instance
 storage_service = StorageService()

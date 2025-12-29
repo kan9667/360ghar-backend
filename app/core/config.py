@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     
     # Additional Supabase settings
     SUPABASE_STORAGE_BUCKET: str = "property-images"
+    SUPABASE_DOCUMENTS_BUCKET: str = "property-documents"
 
     # Firebase / FCM
     FIREBASE_PROJECT_ID: str | None = None

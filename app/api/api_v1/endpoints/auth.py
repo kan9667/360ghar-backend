@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
@@ -6,6 +8,7 @@ from app.core.logging import get_logger
 from app.schemas.user import UserCreate, UserLogin, User as UserSchema
 from app.services.user import get_or_create_user_from_supabase
 import anyio
+from pydantic import BaseModel
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -170,5 +173,91 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
             detail={
                 "code": "REGISTRATION_FAILED",
                 "message": f"Registration failed: {str(e)}",
+            },
+        )
+
+
+class OTPRequest(BaseModel):
+    phone: str
+
+
+@router.post("/otp/request")
+async def request_otp(payload: OTPRequest):
+    """Request an OTP for phone login (Supabase passwordless OTP)."""
+    try:
+        supabase = get_supabase_auth_client()
+        await anyio.to_thread.run_sync(
+            lambda: supabase.auth.sign_in_with_otp({"phone": payload.phone})
+        )
+        return {"message": "OTP sent"}
+    except Exception as e:
+        logger.error(f"OTP request failed: {e}", extra={"phone": payload.phone})
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "OTP_REQUEST_FAILED",
+                "message": "Failed to send OTP",
+            },
+        )
+
+
+class OTPVerify(BaseModel):
+    phone: str
+    token: str
+    type: Literal["sms", "phone_change"] = "sms"
+
+
+@router.post("/otp/verify")
+async def verify_otp(payload: OTPVerify, db: AsyncSession = Depends(get_db)):
+    """Verify an OTP and return a bearer token + local user record."""
+    try:
+        supabase = get_supabase_auth_client()
+        auth_resp = await anyio.to_thread.run_sync(
+            lambda: supabase.auth.verify_otp(
+                {
+                    "phone": payload.phone,
+                    "token": payload.token,
+                    "type": payload.type,
+                }
+            )
+        )
+
+        session = getattr(auth_resp, "session", None)
+        access_token = getattr(session, "access_token", None) if session else None
+        if not access_token:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "OTP_INVALID",
+                    "message": "Invalid or expired OTP",
+                },
+            )
+
+        supabase_user_data = await verify_supabase_token(access_token)
+        if not supabase_user_data:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "TOKEN_INVALID",
+                    "message": "Invalid or expired token",
+                },
+            )
+
+        db_user = await get_or_create_user_from_supabase(db, supabase_user_data)
+
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": db_user,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"OTP verify failed: {e}", extra={"phone": payload.phone})
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "OTP_VERIFY_FAILED",
+                "message": "OTP verification failed",
             },
         )

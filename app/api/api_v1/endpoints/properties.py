@@ -14,7 +14,8 @@ from app.schemas.common import PaginationParams, PaginatedResponse, MessageRespo
 from app.services.property import (
     create_property, get_property, update_property,
     delete_property, get_property_recommendations,
-    get_unified_properties_optimized, increment_property_view_count
+    get_unified_properties_optimized, increment_property_view_count,
+    list_user_properties,
 )
 from app.services.visit import get_user_property_visit_stats
 from app.services.swipe import get_user_like_for_property
@@ -144,6 +145,15 @@ async def create_new_property(
     except Exception as e:
         logger.error(f"Failed to create property for user {current_user.id}: {str(e)}")
         raise
+
+
+@router.get("/me/", response_model=List[Property])
+async def get_my_properties(
+    current_user: UserSchema = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List properties owned by the current user (requires authentication)."""
+    return await list_user_properties(db, owner_id=current_user.id)
 
 @router.get("/", response_model=UnifiedPropertyResponse)
 async def get_properties_list(

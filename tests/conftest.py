@@ -2,10 +2,11 @@
 Test configuration and fixtures
 """
 import pytest
+import pytest_asyncio
 import asyncio
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.core.config import settings
@@ -19,17 +20,21 @@ def event_loop():
     loop.close()
 
 
-@pytest.fixture(scope="function")
+@pytest_asyncio.fixture(scope="function")
 async def test_db() -> AsyncGenerator[AsyncSession, None]:
     """
     Create a test database session.
     Uses in-memory SQLite for fast testing.
     """
+    # Ensure all models are imported so SQLAlchemy registers their tables
+    import app.models  # noqa: F401
+
     # Create in-memory SQLite engine for testing
     engine = create_async_engine(
         "sqlite+aiosqlite:///:memory:",
         echo=False,
-        poolclass=NullPool,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
 
     # Create all tables

@@ -30,7 +30,11 @@ class User(Base):
     
     # Relationships
     agent: Mapped[Optional["Agent"]] = relationship(back_populates="users")
-    owned_properties: Mapped[List["Property"]] = relationship("Property", back_populates="owner")
+    owned_properties: Mapped[List["Property"]] = relationship(
+        "Property",
+        back_populates="owner",
+        foreign_keys="Property.owner_id",
+    )
     swipes: Mapped[List["UserSwipe"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     visits: Mapped[List["Visit"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     bookings: Mapped[List["Booking"]] = relationship(back_populates="user", cascade="all, delete-orphan")

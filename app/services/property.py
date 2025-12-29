@@ -139,6 +139,22 @@ async def get_property(db: AsyncSession, property_id: int) -> PropertySchema:
         logger.error(f"Failed to fetch property {property_id}: {str(e)}", exc_info=True)
         raise
 
+
+async def list_user_properties(db: AsyncSession, owner_id: int) -> List[PropertySchema]:
+    """List properties owned by a specific user (auth enforced by caller)."""
+    stmt = (
+        select(Property)
+        .options(
+            selectinload(Property.images),
+            selectinload(Property.property_amenities).selectinload(PropertyAmenity.amenity),
+        )
+        .where(Property.owner_id == owner_id)
+        .order_by(Property.created_at.desc())
+    )
+    res = await db.execute(stmt)
+    properties = res.scalars().all()
+    return [PropertySchema.model_validate(p) for p in properties]
+
 async def update_property(
     db: AsyncSession,
     property_id: int,

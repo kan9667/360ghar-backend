@@ -1,0 +1,131 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.exceptions import BadRequestException, InsufficientPermissionsError, NotFoundException
+from app.models.enums import InspectionType, UserRole
+from app.models.pm_inspections import InspectionChecklist
+from app.models.pm_leases import Lease
+from app.models.users import User
+from app.services.pm_authz import assert_can_access_lease, assert_can_manage_owner_portfolio
+
+
+async def create_inspection_checklist(
+    db: AsyncSession,
+    *,
+    actor: User,
+    owner_id: int,
+    lease_id: int,
+    inspection_type: InspectionType,
+    rooms_data: Optional[dict] = None,
+    overall_notes: Optional[str] = None,
+    conducted_at: Optional[datetime] = None,
+) -> InspectionChecklist:
+    await assert_can_manage_owner_portfolio(db, actor=actor, owner_id=owner_id)
+    lease = await assert_can_access_lease(db, actor=actor, lease_id=lease_id)
+    if lease.owner_id != owner_id and actor.role != UserRole.admin.value:
+        raise BadRequestException(detail="lease_id does not belong to owner_id")
+
+    checklist = InspectionChecklist(
+        property_id=lease.property_id,
+        lease_id=lease.id,
+        owner_id=owner_id,
+        inspection_type=inspection_type,
+        conducted_by_user_id=actor.id,
+        conducted_at=conducted_at or datetime.utcnow(),
+        rooms_data=rooms_data,
+        overall_notes=overall_notes,
+    )
+    db.add(checklist)
+    await db.flush()
+    await db.refresh(checklist)
+    return checklist
+
+
+async def list_inspections(
+    db: AsyncSession,
+    *,
+    actor: User,
+    owner_id: Optional[int] = None,
+    lease_id: Optional[int] = None,
+    property_id: Optional[int] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[InspectionChecklist]:
+    if actor.role == UserRole.user.value:
+        owner_id = actor.id
+    elif actor.role == UserRole.agent.value:
+        if owner_id is None:
+            raise InsufficientPermissionsError("owner_id is required for agents")
+    if owner_id is not None:
+        await assert_can_manage_owner_portfolio(db, actor=actor, owner_id=owner_id)
+
+    stmt = select(InspectionChecklist)
+    if owner_id is not None:
+        stmt = stmt.where(InspectionChecklist.owner_id == owner_id)
+    if lease_id is not None:
+        stmt = stmt.where(InspectionChecklist.lease_id == lease_id)
+    if property_id is not None:
+        stmt = stmt.where(InspectionChecklist.property_id == property_id)
+
+    stmt = stmt.order_by(InspectionChecklist.conducted_at.desc()).offset(offset).limit(limit)
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
+
+
+async def get_inspection(
+    db: AsyncSession,
+    *,
+    actor: User,
+    inspection_id: int,
+) -> InspectionChecklist:
+    checklist = await db.get(InspectionChecklist, inspection_id)
+    if not checklist:
+        raise NotFoundException(detail="Inspection checklist not found")
+
+    # Owner/RM access via owner_id; tenant access not supported in MVP unless shared docs
+    if actor.role == UserRole.admin.value:
+        return checklist
+
+    await assert_can_manage_owner_portfolio(db, actor=actor, owner_id=checklist.owner_id)
+    return checklist
+
+
+async def sign_inspection(
+    db: AsyncSession,
+    *,
+    actor: User,
+    inspection_id: int,
+    tenant_signature_document_id: Optional[int] = None,
+    owner_signature_document_id: Optional[int] = None,
+) -> InspectionChecklist:
+    checklist = await db.get(InspectionChecklist, inspection_id)
+    if not checklist:
+        raise NotFoundException(detail="Inspection checklist not found")
+
+    lease = await db.get(Lease, checklist.lease_id)
+    if not lease:
+        raise NotFoundException(detail="Lease not found")
+
+    now = datetime.utcnow()
+
+    # Tenant can only attach tenant signature; owner can attach owner signature.
+    if tenant_signature_document_id is not None:
+        if lease.tenant_user_id != actor.id:
+            raise InsufficientPermissionsError("Only the tenant can sign as tenant")
+        checklist.tenant_signature_document_id = tenant_signature_document_id
+        checklist.signed_by_tenant_at = now
+
+    if owner_signature_document_id is not None:
+        await assert_can_manage_owner_portfolio(db, actor=actor, owner_id=checklist.owner_id)
+        checklist.owner_signature_document_id = owner_signature_document_id
+        checklist.signed_by_owner_at = now
+
+    await db.flush()
+    await db.refresh(checklist)
+    return checklist
+

@@ -1,5 +1,31 @@
 from fastapi import APIRouter
-from app.api.api_v1.endpoints import auth, users, properties, visits, bookings, swipes, agents, amenities, upload, core, blog, notifications, oauth
+from app.api.api_v1.endpoints import (
+    auth,
+    users,
+    properties,
+    visits,
+    bookings,
+    swipes,
+    agents,
+    amenities,
+    upload,
+    core,
+    blog,
+    notifications,
+    oauth,
+    pm_dashboard,
+    pm_properties,
+    pm_assignments,
+    pm_applications,
+    pm_tenants,
+    pm_leases,
+    pm_rent,
+    pm_expenses,
+    pm_maintenance,
+    pm_documents,
+    pm_inspections,
+    pm_reports,
+)
 
 api_router = APIRouter()
 
@@ -19,3 +45,18 @@ api_router.include_router(blog.router, prefix="/blogs", tags=["blog"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 # OAuth endpoints are mounted at the root level for MCP compatibility
 api_router.include_router(oauth.router, tags=["oauth"])
+
+# Property Management (PM) - new surface area for the PM mobile app
+api_router.include_router(pm_dashboard.router, prefix="/pm/dashboard", tags=["pm-dashboard"])
+api_router.include_router(pm_properties.router, prefix="/pm/properties", tags=["pm-properties"])
+api_router.include_router(pm_assignments.router, prefix="/pm/assignments", tags=["pm-assignments"])
+api_router.include_router(pm_applications.router, prefix="/pm/applications", tags=["pm-applications"])
+api_router.include_router(pm_applications.public_router, prefix="/pm/public", tags=["pm-public"])
+api_router.include_router(pm_tenants.router, prefix="/pm/tenants", tags=["pm-tenants"])
+api_router.include_router(pm_leases.router, prefix="/pm/leases", tags=["pm-leases"])
+api_router.include_router(pm_rent.router, prefix="/pm/rent", tags=["pm-rent"])
+api_router.include_router(pm_expenses.router, prefix="/pm/expenses", tags=["pm-expenses"])
+api_router.include_router(pm_maintenance.router, prefix="/pm/maintenance", tags=["pm-maintenance"])
+api_router.include_router(pm_documents.router, prefix="/pm/documents", tags=["pm-documents"])
+api_router.include_router(pm_inspections.router, prefix="/pm/inspections", tags=["pm-inspections"])
+api_router.include_router(pm_reports.router, prefix="/pm/reports", tags=["pm-reports"])

@@ -6,6 +6,12 @@ from .agents import Agent
 from .bookings import Booking
 from .core import BugReport, Page, AppVersion, FAQ
 from .properties import Property, PropertyImage, Amenity, PropertyAmenity, Visit
+from .pm_documents import Document
+from .pm_tenants import RentalApplicationForm, RentalApplication
+from .pm_leases import Lease
+from .pm_finance import RentCharge, RentPayment, Expense
+from .pm_maintenance import MaintenanceRequest
+from .pm_inspections import InspectionChecklist
 from .enums import *
 
 __all__ = [
@@ -32,4 +38,15 @@ __all__ = [
     "Amenity", 
     "PropertyAmenity",
     "Visit",
+
+    # Property Management
+    "Document",
+    "RentalApplicationForm",
+    "RentalApplication",
+    "Lease",
+    "RentCharge",
+    "RentPayment",
+    "Expense",
+    "MaintenanceRequest",
+    "InspectionChecklist",
 ]

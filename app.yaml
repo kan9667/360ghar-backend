@@ -1,3 +1,27 @@
 kind: wasmer.io/App.v0
+
+# Wasmer Edge app metadata
+name: 360ghar-backend
+owner: "saksham1991999"
+description: "360Ghar Real Estate Backend API (includes /api/v1/pm/* Property Management APIs)"
+
+# Use the local package (paired with wasmer.toml). `wasmer deploy` may prompt to publish.
 package: .
-capabilities: {}
+
+# Args/env must mirror wasmer.toml command annotations for Edge deployments.
+cli_args:
+  - run.py
+env:
+  PYTHONPATH: /app
+  ENVIRONMENT: production
+
+health_checks:
+  - http:
+      method: get
+      path: /health
+      interval: 30s
+      timeout: 10s
+      unhealthy_threshold: 2
+      healthy_threshold: 1
+      expected_status_codes:
+        - 200

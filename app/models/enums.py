@@ -96,3 +96,112 @@ class UserRole(str, Enum):
     user = "user"
     agent = "agent"
     admin = "admin"
+
+
+# --------------------
+# Property Management
+# --------------------
+
+class ManagedPropertyStatus(str, Enum):
+    draft = "draft"
+    active = "active"
+    archived = "archived"
+
+
+class TenantStatus(str, Enum):
+    applicant = "applicant"
+    approved = "approved"
+    active = "active"
+    notice_period = "notice_period"
+    vacated = "vacated"
+    rejected = "rejected"
+
+
+class LeaseStatus(str, Enum):
+    draft = "draft"
+    pending_signature = "pending_signature"
+    active = "active"
+    expiring_soon = "expiring_soon"
+    expired = "expired"
+    terminated = "terminated"
+    renewed = "renewed"
+
+
+class RentChargeStatus(str, Enum):
+    pending = "pending"
+    partial = "partial"
+    paid = "paid"
+    overdue = "overdue"
+    waived = "waived"
+
+
+class ExpenseCategory(str, Enum):
+    maintenance = "maintenance"
+    repairs = "repairs"
+    insurance = "insurance"
+    property_tax = "property_tax"
+    hoa = "hoa"
+    utilities = "utilities"
+    marketing = "marketing"
+    legal = "legal"
+    other = "other"
+
+
+class MaintenanceUrgency(str, Enum):
+    emergency = "emergency"
+    high = "high"
+    medium = "medium"
+    low = "low"
+
+
+class MaintenanceCategory(str, Enum):
+    plumbing = "plumbing"
+    electrical = "electrical"
+    hvac = "hvac"
+    appliance = "appliance"
+    structural = "structural"
+    pest_control = "pest_control"
+    cleaning = "cleaning"
+    other = "other"
+
+
+class MaintenanceRequestStatus(str, Enum):
+    open = "open"
+    in_review = "in_review"
+    work_order_created = "work_order_created"
+    resolved = "resolved"
+    closed = "closed"
+
+
+class WorkOrderStatus(str, Enum):
+    created = "created"
+    assigned = "assigned"
+    in_progress = "in_progress"
+    completed = "completed"
+    closed = "closed"
+    cancelled = "cancelled"
+
+
+class DocumentType(str, Enum):
+    lease_agreement = "lease_agreement"
+    id_proof = "id_proof"
+    address_proof = "address_proof"
+    income_proof = "income_proof"
+    inspection_report = "inspection_report"
+    receipt = "receipt"
+    invoice = "invoice"
+    property_deed = "property_deed"
+    insurance_policy = "insurance_policy"
+    other = "other"
+
+
+class InspectionType(str, Enum):
+    move_in = "move_in"
+    move_out = "move_out"
+    routine = "routine"
+
+
+class MessageThreadType(str, Enum):
+    lease = "lease"
+    maintenance = "maintenance"
+    general = "general"

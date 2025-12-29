@@ -1,0 +1,233 @@
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Optional
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.exceptions import BadRequestException, InsufficientPermissionsError, NotFoundException
+from app.models.enums import LeaseStatus, UserRole
+from app.models.pm_leases import Lease
+from app.models.properties import Property
+from app.models.users import User
+from app.services.pm_authz import assert_can_access_property, assert_can_access_lease, assert_can_manage_owner_portfolio
+
+
+async def create_lease(
+    db: AsyncSession,
+    *,
+    actor: User,
+    owner_id: int,
+    property_id: int,
+    tenant_user_id: Optional[int],
+    tenant_name: Optional[str],
+    tenant_phone: Optional[str],
+    tenant_email: Optional[str],
+    status: LeaseStatus = LeaseStatus.draft,
+    start_date: date,
+    end_date: date,
+    monthly_rent: float,
+    security_deposit: float,
+    late_fee_amount: Optional[float] = None,
+    late_fee_percentage: Optional[float] = None,
+    grace_period_days: int = 5,
+    payment_due_day: int = 1,
+    lease_terms: Optional[dict] = None,
+    special_clauses: Optional[str] = None,
+    lease_document_id: Optional[int] = None,
+) -> Lease:
+    await assert_can_manage_owner_portfolio(db, actor=actor, owner_id=owner_id)
+    prop = await assert_can_access_property(db, actor=actor, property_id=property_id)
+
+    if prop.owner_id != owner_id and actor.role != UserRole.admin.value:
+        raise BadRequestException(detail="property_id does not belong to owner_id")
+
+    if end_date <= start_date:
+        raise BadRequestException(detail="end_date must be after start_date")
+
+    # Prevent multiple active leases for the same property.
+    if status == LeaseStatus.active:
+        existing = await db.execute(
+            select(Lease.id).where(
+                Lease.property_id == property_id,
+                Lease.status == LeaseStatus.active,
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise BadRequestException(detail="Property already has an active lease")
+
+    lease = Lease(
+        property_id=property_id,
+        owner_id=owner_id,
+        tenant_user_id=tenant_user_id,
+        tenant_name=tenant_name,
+        tenant_phone=tenant_phone,
+        tenant_email=tenant_email,
+        status=status,
+        start_date=start_date,
+        end_date=end_date,
+        monthly_rent=monthly_rent,
+        security_deposit=security_deposit,
+        late_fee_amount=late_fee_amount,
+        late_fee_percentage=late_fee_percentage,
+        grace_period_days=grace_period_days,
+        payment_due_day=payment_due_day,
+        lease_terms=lease_terms,
+        special_clauses=special_clauses,
+        lease_document_id=lease_document_id,
+    )
+    db.add(lease)
+    await db.flush()
+    await db.refresh(lease)
+
+    # Mark property as managed and set convenience pointers when lease is active.
+    if getattr(prop, "is_managed", False) is False:
+        prop.is_managed = True
+    if status == LeaseStatus.active:
+        prop.current_lease_id = lease.id
+        prop.current_tenant_id = tenant_user_id
+    await db.flush()
+    return lease
+
+
+async def list_leases(
+    db: AsyncSession,
+    *,
+    actor: User,
+    owner_id: Optional[int] = None,
+    property_id: Optional[int] = None,
+    tenant_user_id: Optional[int] = None,
+    status: Optional[LeaseStatus] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Lease]:
+    # Resolve scope
+    if actor.role == UserRole.user.value:
+        # Owner list context
+        owner_id = actor.id
+    elif actor.role == UserRole.agent.value:
+        if owner_id is None:
+            raise InsufficientPermissionsError("owner_id is required for agents")
+    if owner_id is not None:
+        await assert_can_manage_owner_portfolio(db, actor=actor, owner_id=owner_id)
+
+    stmt = select(Lease)
+    if owner_id is not None:
+        stmt = stmt.where(Lease.owner_id == owner_id)
+    if property_id is not None:
+        stmt = stmt.where(Lease.property_id == property_id)
+    if tenant_user_id is not None:
+        stmt = stmt.where(Lease.tenant_user_id == tenant_user_id)
+    if status is not None:
+        stmt = stmt.where(Lease.status == status)
+
+    stmt = stmt.order_by(Lease.created_at.desc()).offset(offset).limit(limit)
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
+
+
+async def get_lease(db: AsyncSession, *, actor: User, lease_id: int) -> Lease:
+    return await assert_can_access_lease(db, actor=actor, lease_id=lease_id)
+
+
+async def upload_signed_lease(
+    db: AsyncSession,
+    *,
+    actor: User,
+    lease_id: int,
+    lease_document_id: int,
+    signed_by_owner: bool = True,
+    signed_by_tenant: bool = False,
+) -> Lease:
+    lease = await assert_can_access_lease(db, actor=actor, lease_id=lease_id)
+
+    lease.lease_document_id = lease_document_id
+    now = datetime.utcnow()
+    if signed_by_owner:
+        lease.signed_by_owner_at = now
+    if signed_by_tenant:
+        lease.signed_by_tenant_at = now
+
+    await db.flush()
+    await db.refresh(lease)
+    return lease
+
+
+async def terminate_lease(
+    db: AsyncSession,
+    *,
+    actor: User,
+    lease_id: int,
+) -> Lease:
+    lease = await assert_can_access_lease(db, actor=actor, lease_id=lease_id)
+    if lease.status in {LeaseStatus.terminated, LeaseStatus.expired}:
+        return lease
+
+    lease.status = LeaseStatus.terminated
+    await db.flush()
+
+    prop = await db.get(Property, lease.property_id)
+    if prop and prop.current_lease_id == lease.id:
+        prop.current_lease_id = None
+        prop.current_tenant_id = None
+        await db.flush()
+
+    await db.refresh(lease)
+    return lease
+
+
+async def renew_lease(
+    db: AsyncSession,
+    *,
+    actor: User,
+    lease_id: int,
+    start_date: date,
+    end_date: date,
+    monthly_rent: Optional[float] = None,
+    security_deposit: Optional[float] = None,
+    make_active: bool = False,
+) -> Lease:
+    old = await assert_can_access_lease(db, actor=actor, lease_id=lease_id)
+
+    if end_date <= start_date:
+        raise BadRequestException(detail="end_date must be after start_date")
+
+    new_status = LeaseStatus.active if make_active else LeaseStatus.draft
+
+    new = Lease(
+        property_id=old.property_id,
+        owner_id=old.owner_id,
+        tenant_user_id=old.tenant_user_id,
+        tenant_name=old.tenant_name,
+        tenant_phone=old.tenant_phone,
+        tenant_email=old.tenant_email,
+        status=new_status,
+        start_date=start_date,
+        end_date=end_date,
+        monthly_rent=float(monthly_rent if monthly_rent is not None else old.monthly_rent),
+        security_deposit=float(
+            security_deposit if security_deposit is not None else old.security_deposit
+        ),
+        late_fee_amount=old.late_fee_amount,
+        late_fee_percentage=old.late_fee_percentage,
+        grace_period_days=old.grace_period_days,
+        payment_due_day=old.payment_due_day,
+        lease_terms=old.lease_terms,
+        special_clauses=old.special_clauses,
+    )
+    db.add(new)
+    old.status = LeaseStatus.renewed
+    await db.flush()
+    await db.refresh(new)
+
+    if new_status == LeaseStatus.active:
+        prop = await db.get(Property, new.property_id)
+        if prop:
+            prop.is_managed = True
+            prop.current_lease_id = new.id
+            prop.current_tenant_id = new.tenant_user_id
+            await db.flush()
+
+    return new
+

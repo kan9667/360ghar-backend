@@ -1,7 +1,13 @@
 from pydantic import BaseModel, field_validator, ConfigDict, model_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from app.models.enums import PropertyType, PropertyPurpose, PropertyStatus, ImageCategory
+from app.models.enums import (
+    ManagedPropertyStatus,
+    PropertyType,
+    PropertyPurpose,
+    PropertyStatus,
+    ImageCategory,
+)
 from app.utils.validators import ValidationUtils
 from app.schemas.amenity import PropertyAmenityResponse
 from enum import Enum
@@ -196,6 +202,15 @@ class PropertyInDB(PropertyBase):
     view_count: int
     like_count: int
     interest_count: int
+
+    # Property Management
+    is_managed: bool = False
+    management_status: Optional[ManagedPropertyStatus] = None
+    payment_due_day: Optional[int] = None
+    grace_period_days: Optional[int] = None
+    late_fee_policy: Optional[Dict[str, Any]] = None
+    current_lease_id: Optional[int] = None
+    current_tenant_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     
