@@ -1,38 +1,98 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-- Core application lives in `app/` (FastAPI app in `app/main.py`).
-- HTTP APIs are under `app/api/api_v1/endpoints/` (one module per domain, e.g. `properties.py`, `bookings.py`).
-- Domain models are in `app/models/`, Pydantic schemas in `app/schemas/`, shared logic in `app/services/` and `app/utils/`.
-- Database and config utilities live in `app/core/`; Supabase migrations live in `supabase/migrations/`; data scripts are in `populate_data/` and `tools/`.
-
 ## Build, Test, and Development Commands
-- Create env and install deps: `python -m venv venv && source venv/bin/activate && pip install -r requirements.txt`.
-- Run API locally: `python run.py` (uses `ENVIRONMENT` from `.env`) or `fastapi dev app/main.py --host 0.0.0.0 --port 8000` for hot reload.
-- Start infra services: `docker-compose up -d db redis`.
-- Run tests (when present): `pytest` from repo root.
 
-## Coding Style & Naming Conventions
-- Python 3.10+, FastAPI, SQLAlchemy 2.x, Pydantic v2. Use type hints everywhere.
-- Follow PEP 8 with 4‑space indentation and `snake_case` for modules, functions, and variables; `PascalCase` for classes and Pydantic models.
-- Place new endpoints in the appropriate `app/api/api_v1/endpoints/*.py` file and wire them via the router in `app/api/api_v1/api.py`.
-- Keep business logic in `services/` rather than inside route handlers where feasible.
+### Setup
+```bash
+python -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+docker-compose up -d db redis
+```
 
-## Testing Guidelines
-- Use `pytest` (and `pytest-asyncio` for async code). Name test files like `tests/api/test_properties.py` and test functions `test_*`.
-- Prefer fast, isolated tests around services and critical endpoints; add regression tests for every bug fix.
-- Aim for meaningful coverage on new or changed code (roughly 80%+ where practical).
+### Running the API
+```bash
+python run.py
+# or hot reload:
+fastapi dev app/main.py --host 0.0.0.0 --port 8000
+```
 
-## Commit & Pull Request Guidelines
-- Write clear, imperative commit messages similar to existing history, e.g. `Add booking pricing validation` or `Update agent contact fields`.
-- Keep commits and PRs focused on a single logical change set; avoid drive‑by refactors.
-- For PRs, include: short summary, motivation/context, notable implementation choices, tests run (`pytest`, manual checks), and any migration or config impact.
+### Running Tests
+```bash
+pytest tests/ -v                              # all tests
+pytest tests/test_user_service.py -v         # specific file
+pytest tests/ -k "user" -v                   # by keyword
+pytest tests/test_file.py::test_func -v      # single test
+pytest tests/ --cov=app --cov-report=html    # with coverage
+pytest tests/ -n auto                         # parallel
+```
 
-## Security & Configuration Tips
-- Never commit secrets or real credentials. Use `.env` (based on `.env.example`) and `app.core.config.settings` for configuration.
-- Avoid logging sensitive PII or auth tokens; prefer IDs and high‑level context in logs.
-- When adding new settings, declare them in `app/core/config.py` and document expected env vars in `README.md` or `.env.example`.
+### Data Population
+```bash
+python populate_data/load_comprehensive_data.py        # full dataset
+python populate_data/load_comprehensive_data.py --quick  # reduced data
+python populate_data/clear_all_data.py                 # clear data
+```
+
+## Coding Style & Conventions
+
+### General
+- Python 3.10+, FastAPI, SQLAlchemy 2.x, Pydantic v2
+- PEP 8 with 4-space indentation, full type hints everywhere
+- **snake_case** for modules/functions/variables; **PascalCase** for classes
+
+### Imports (sorted alphabetically)
+```python
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional, List
+
+from app.core.database import get_db
+from app.schemas import UserSchema
+from app.services import UserService
+```
+
+### Error Handling
+- Use custom exceptions from `app/core/exceptions.py` (e.g., `UserNotFoundException`)
+- Global exception handlers in `app/main.py` return structured errors with codes
+- Never expose sensitive data in error responses
+
+### Async Patterns
+- All database operations use `async/await`
+- Services inject `AsyncSession` via FastAPI dependencies
+- Transaction context: `async with db.begin()` for atomic operations
+
+### API Structure
+- Endpoints in `app/api/api_v1/endpoints/*.py`
+- Wire via router in `app/api/api_v1/api.py`
+- Keep business logic in `app/services/`
+
+### Response Models
+- Pydantic schemas in `app/schemas/` with `Config.from_attributes = True`
+- Use `Optional[]` for nullable fields, avoid `Union[]`
+- Request models validate with `@field_validator`
+
+### Database
+- Async SQLAlchemy models in `app/models/`
+- PostGIS for geospatial queries, full-text search with `__ts_vector__`
+- Use repositories in `app/repositories/` for complex queries
+
+### Security
+- Supabase JWT authentication via `get_current_user` dependency
+- Phone as primary identifier, role-based access (user/agent/admin)
+- Rate limiting: 100 req/min global, 5 req/min for auth endpoints
+
+## Project Structure
+```
+app/
+  api/api_v1/endpoints/  # REST endpoints
+  services/              # async business logic
+  models/                # SQLAlchemy models
+  schemas/               # Pydantic schemas
+  core/                  # config, auth, db, exceptions
+  middleware/            # rate limit, security headers
+```
 
 ## Agent-Specific Instructions
-- When using automated tools or AI assistants, keep changes minimal, localized, and consistent with the existing module layout.
-- Do not introduce new dependencies or cross‑cutting refactors without an accompanying rationale in the PR description.
+- Keep changes minimal and localized to the module being modified
+- Follow existing patterns in the relevant Cursor rules (`.cursor/rules/`)
+- Do not introduce new dependencies without rationale
+- Never commit secrets; use `.env` and `app.core.config.settings`

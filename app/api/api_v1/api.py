@@ -25,6 +25,7 @@ from app.api.api_v1.endpoints import (
     pm_documents,
     pm_inspections,
     pm_reports,
+    vastu,
 )
 
 api_router = APIRouter()
@@ -60,3 +61,6 @@ api_router.include_router(pm_maintenance.router, prefix="/pm/maintenance", tags=
 api_router.include_router(pm_documents.router, prefix="/pm/documents", tags=["pm-documents"])
 api_router.include_router(pm_inspections.router, prefix="/pm/inspections", tags=["pm-inspections"])
 api_router.include_router(pm_reports.router, prefix="/pm/reports", tags=["pm-reports"])
+
+# Vastu Checker - public endpoint (no auth required)
+api_router.include_router(vastu.router, prefix="/vastu", tags=["vastu"])

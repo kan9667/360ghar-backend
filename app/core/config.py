@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     # Gemini embeddings
     GOOGLE_API_KEY: Optional[str] = None
     GEMINI_EMBED_MODEL: str = "text-embedding-004"
+
+    # GLM (ZhipuAI) API settings for Vastu and other AI features
+    GLM_API_KEY: Optional[str] = None
+    GLM_API_URL: str = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    GLM_MODEL: str = "glm-4.6v-flash"
+
+    # Vastu analyzer settings
+    VASTU_DEFAULT_PROVIDER: str = "glm"  # "gemini" or "glm"
     
     # Vector sync settings
     VECTOR_SYNC_ENABLED: bool = True
