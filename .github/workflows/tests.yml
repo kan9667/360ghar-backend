@@ -95,7 +95,9 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           SUPABASE_URL: https://mock.supabase.co
           SUPABASE_KEY: mock_key_for_testing
+          SUPABASE_SECRET_KEY: mock_secret_key_for_testing
           SUPABASE_JWT_SECRET: mock_jwt_secret_for_testing_purposes_only_32chars
+          SENTRY_DSN: ""
           ENVIRONMENT: test
           CI: "true"
         run: |
