@@ -61,7 +61,7 @@ async def create_custom_domain(
     await db.commit()
     await db.refresh(domain)
 
-    logger.info(f"Created custom domain {data.domain} for user {user_id}")
+    logger.info("Created custom domain %s for user %s", data.domain, user_id)
     return CustomDomainResponse.model_validate(domain)
 
 
@@ -129,7 +129,7 @@ async def verify_domain(
         await db.commit()
         await db.refresh(domain)
 
-        logger.info(f"Domain {domain.domain} verified successfully")
+        logger.info("Domain %s verified successfully", domain.domain)
 
         return CustomDomainVerification(
             domain=domain.domain,
@@ -165,16 +165,16 @@ async def _check_dns_txt_record(domain: str, expected_token: str) -> bool:
                 if expected_token in txt_value:
                     return True
         except dns.resolver.NXDOMAIN:
-            logger.debug(f"No TXT record found for {txt_record_name}")
+            logger.debug("No TXT record found for %s", txt_record_name)
         except dns.resolver.NoAnswer:
-            logger.debug(f"No TXT answer for {txt_record_name}")
+            logger.debug("No TXT answer for %s", txt_record_name)
         except dns.resolver.Timeout:
-            logger.warning(f"DNS timeout for {txt_record_name}")
+            logger.warning("DNS timeout for %s", txt_record_name)
 
     except ImportError:
         logger.warning("dnspython not installed, DNS verification skipped")
     except Exception as e:
-        logger.error(f"DNS verification error: {e}")
+        logger.error("DNS verification error: %s", e)
 
     return False
 
@@ -198,7 +198,7 @@ async def delete_custom_domain(
     await db.delete(domain)
     await db.commit()
 
-    logger.info(f"Deleted custom domain {domain.domain} for user {user_id}")
+    logger.info("Deleted custom domain %s for user %s", domain.domain, user_id)
     return True
 
 

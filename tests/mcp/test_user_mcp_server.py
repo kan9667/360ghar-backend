@@ -13,18 +13,18 @@ class TestOwnerPropertyTools:
     @pytest.mark.asyncio
     async def test_owner_properties_list_authenticated(self, mock_mcp_context):
         """Test listing owner properties with auth."""
-        from app.mcp.user_server import owner_properties_list
+        from app.mcp.user.owner import owner_properties_list
 
         # Get the underlying function from the FunctionTool
         fn = owner_properties_list.fn if hasattr(owner_properties_list, 'fn') else owner_properties_list
 
-        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.user.owner._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="user")
 
-            with patch("app.mcp.user_server.list_managed_properties", new_callable=AsyncMock) as mock_list:
+            with patch("app.mcp.user.owner.list_managed_properties", new_callable=AsyncMock) as mock_list:
                 mock_list.return_value = {"items": [], "total": 0}
 
-                with patch("app.mcp.user_server.get_db") as mock_db:
+                with patch("app.mcp.user.owner.get_db") as mock_db:
                     mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                     result = await fn()
@@ -34,16 +34,16 @@ class TestOwnerPropertyTools:
     @pytest.mark.asyncio
     async def test_owner_properties_list_unauthenticated(self):
         """Test listing properties without auth."""
-        from app.mcp.user_server import owner_properties_list
+        from app.mcp.user.owner import owner_properties_list
         from app.mcp.apps_sdk import AuthRequiredError
 
         # Get the underlying function from the FunctionTool
         fn = owner_properties_list.fn if hasattr(owner_properties_list, 'fn') else owner_properties_list
 
-        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.user.owner._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = None
 
-            with patch("app.mcp.user_server.get_db") as mock_db:
+            with patch("app.mcp.user.owner.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 with pytest.raises(AuthRequiredError):
@@ -52,12 +52,12 @@ class TestOwnerPropertyTools:
     @pytest.mark.asyncio
     async def test_owner_properties_list_www_authenticate_meta(self, mock_mcp_context):
         """Tool-level auth prompts should include mcp/www_authenticate meta."""
-        from app.mcp.user_server import user_mcp
+        from app.mcp.user.server import user_mcp
 
-        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.user.owner._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = None
 
-            with patch("app.mcp.user_server.get_db") as mock_db:
+            with patch("app.mcp.user.owner.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await user_mcp._call_tool_mcp("owner_properties_list", {})
@@ -72,7 +72,7 @@ class TestOwnerPropertyTools:
     async def test_tools_list_includes_security_schemes_and_template(self, mock_mcp_context):
         """Apps SDK expects tool security schemes + output template metadata."""
         import mcp.types as mcp_types
-        from app.mcp.user_server import user_mcp
+        from app.mcp.user.server import user_mcp
 
         request = mcp_types.ListToolsRequest(method="tools/list", params={})
         tools_result = await user_mcp._list_tools_mcp(request)
@@ -92,21 +92,21 @@ class TestOwnerPropertyCreate:
     @pytest.mark.asyncio
     async def test_create_property_success(self, mock_mcp_context):
         """Test creating property."""
-        from app.mcp.user_server import owner_properties_create
+        from app.mcp.user.owner import owner_properties_create
 
         # Get the underlying function from the FunctionTool
         fn = owner_properties_create.fn if hasattr(owner_properties_create, 'fn') else owner_properties_create
 
-        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.user.owner._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="user")
 
-            with patch("app.mcp.user_server.create_managed_property", new_callable=AsyncMock) as mock_create:
+            with patch("app.mcp.user.owner.create_managed_property", new_callable=AsyncMock) as mock_create:
                 mock_property = MagicMock()
                 mock_property.id = 1
                 mock_property.title = "New Property"
                 mock_create.return_value = mock_property
 
-                with patch("app.mcp.user_server.get_db") as mock_db:
+                with patch("app.mcp.user.owner.get_db") as mock_db:
                     mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                     result = await fn(
@@ -131,15 +131,15 @@ class TestTenantTools:
     @pytest.mark.asyncio
     async def test_tenant_lease_current(self, mock_mcp_context):
         """Test getting current tenant lease."""
-        from app.mcp.user_server import tenant_lease_current
+        from app.mcp.user.tenant import tenant_lease_current
 
         # Get the underlying function from the FunctionTool
         fn = tenant_lease_current.fn if hasattr(tenant_lease_current, 'fn') else tenant_lease_current
 
-        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.user.tenant._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="user")
 
-            with patch("app.mcp.user_server.get_db") as mock_db:
+            with patch("app.mcp.user.tenant.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn()
@@ -149,15 +149,15 @@ class TestTenantTools:
     @pytest.mark.asyncio
     async def test_tenant_rent_history(self, mock_mcp_context):
         """Test getting tenant rent history."""
-        from app.mcp.user_server import tenant_rent_history
+        from app.mcp.user.tenant import tenant_rent_history
 
         # Get the underlying function from the FunctionTool
         fn = tenant_rent_history.fn if hasattr(tenant_rent_history, 'fn') else tenant_rent_history
 
-        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.user.tenant._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="user")
 
-            with patch("app.mcp.user_server.get_db") as mock_db:
+            with patch("app.mcp.user.tenant.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn()
@@ -171,18 +171,18 @@ class TestBookingTools:
     @pytest.mark.asyncio
     async def test_bookings_list(self, mock_mcp_context):
         """Test listing user bookings."""
-        from app.mcp.user_server import bookings_list
+        from app.mcp.user.booking import bookings_list
 
         # Get the underlying function from the FunctionTool
         fn = bookings_list.fn if hasattr(bookings_list, 'fn') else bookings_list
 
-        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.user.booking._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="user")
 
-            with patch("app.mcp.user_server.booking_svc.get_user_bookings", new_callable=AsyncMock) as mock_list:
+            with patch("app.mcp.user.booking.booking_svc.get_user_bookings", new_callable=AsyncMock) as mock_list:
                 mock_list.return_value = {"bookings": [], "total": 0}
 
-                with patch("app.mcp.user_server.get_db") as mock_db:
+                with patch("app.mcp.user.booking.get_db") as mock_db:
                     mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                     result = await fn()
@@ -192,15 +192,15 @@ class TestBookingTools:
     @pytest.mark.asyncio
     async def test_bookings_check_availability(self, mock_mcp_context):
         """Test checking property availability."""
-        from app.mcp.user_server import bookings_check_availability
+        from app.mcp.user.booking import bookings_check_availability
 
         # Get the underlying function from the FunctionTool
         fn = bookings_check_availability.fn if hasattr(bookings_check_availability, 'fn') else bookings_check_availability
 
-        with patch("app.mcp.user_server.booking_svc.check_availability", new_callable=AsyncMock) as mock_check:
+        with patch("app.mcp.user.booking.booking_svc.check_availability", new_callable=AsyncMock) as mock_check:
             mock_check.return_value = {"available": True, "conflicts": []}
 
-            with patch("app.mcp.user_server.get_db") as mock_db:
+            with patch("app.mcp.user.booking.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn(

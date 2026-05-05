@@ -18,6 +18,7 @@ from enum import Enum
 from typing import Optional
 
 from app.core.config import settings
+from app.core.constants import DEFAULT_VISION_MODEL_GEMINI, DEFAULT_VISION_MODEL_GLM, DEFAULT_VISION_PROVIDER
 from app.services.ai.base import (
     AIProvider,
     AIProviderConfig,
@@ -67,7 +68,7 @@ def get_ai_provider(
 
         config = AIProviderConfig(
             api_key=api_key,
-            model=config_overrides.pop("model", settings.GEMINI_MODEL),
+            model=config_overrides.pop("model", DEFAULT_VISION_MODEL_GEMINI),
             max_tokens=config_overrides.pop("max_tokens", 8000),
             temperature=config_overrides.pop("temperature", 0.7),
             timeout=config_overrides.pop("timeout", 120),
@@ -83,7 +84,7 @@ def get_ai_provider(
 
         config = AIProviderConfig(
             api_key=api_key,
-            model=config_overrides.pop("model", getattr(settings, "GLM_MODEL", "glm-4.6v-flash")),
+            model=config_overrides.pop("model", DEFAULT_VISION_MODEL_GLM),
             max_tokens=config_overrides.pop("max_tokens", 4000),
             temperature=config_overrides.pop("temperature", 0.7),
             timeout=config_overrides.pop("timeout", 120),
@@ -100,7 +101,7 @@ def get_default_provider() -> AIProvider:
 
     Falls back to Gemini if no preference is set.
     """
-    default_type = getattr(settings, "VASTU_DEFAULT_PROVIDER", "gemini")
+    default_type = DEFAULT_VISION_PROVIDER
     try:
         provider_type = AIProviderType(default_type.lower())
     except ValueError:

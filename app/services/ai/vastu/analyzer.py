@@ -3,47 +3,117 @@ Vastu Analysis Service.
 
 This module provides the main analysis function that uses the AI provider abstraction
 to analyze floor plan images for Vastu Shastra compliance.
+
+Robustness features:
+- Automatic retries at the HTTP layer via ``AIProvider._make_request`` (tenacity)
+- Provider fallback: if the primary provider fails, the secondary provider is tried
+- JSON parse retry: if the LLM returns unparseable JSON, one retry with a corrective nudge
 """
 
-from typing import Optional
+from __future__ import annotations
 
+from app.core.constants import (
+    DEFAULT_VISION_PROVIDER,
+    VALID_VISION_PROVIDERS,
+    VASTU_FALLBACK_PROVIDER,
+)
 from app.core.logging import get_logger
 from app.core.utils import utc_now_iso
 from app.services.ai import (
-    get_ai_provider,
-    AIProviderType,
     AIMessage,
+    AIProviderError,
+    AIProviderType,
     AIRole,
     VisionInput,
-    AIProviderError,
+    get_ai_provider,
 )
 from app.services.ai.vastu.prompts import (
     VASTU_VISION_SYSTEM_PROMPT,
-    get_user_prompt,
     generate_markdown_report,
+    get_user_prompt,
 )
 from app.services.ai.vastu.schemas import (
-    VastuAnalyzeRequest,
-    VastuAnalysisResult,
-    VastuAnalyzeResponse,
-    FloorPlanAnalysis,
-    RoomInfo,
-    EntranceInfo,
-    ToiletInfo,
-    StaircaseInfo,
+    AnalysisWarning,
+    AnalysisWarningSeverity,
+    AnalysisWarningType,
     BalconyInfo,
+    DefectSeverity,
+    EntranceInfo,
+    FloorPlanAnalysis,
+    RemedyType,
+    RoomInfo,
     RoomVastuAnalysis,
+    StaircaseInfo,
+    ToiletInfo,
+    VastuAnalysisResult,
+    VastuAnalyzeRequest,
+    VastuAnalyzeResponse,
     VastuDefect,
     VastuRemedy,
     VastuStatus,
-    DefectSeverity,
-    RemedyType,
-    AnalysisWarning,
-    AnalysisWarningType,
-    AnalysisWarningSeverity,
 )
 
 logger = get_logger(__name__)
+
+# Nudge appended when the first LLM response fails JSON parsing
+_JSON_RETRY_NUDGE = (
+    "\n\nIMPORTANT: Your previous response was not valid JSON. "
+    "You MUST respond with ONLY a valid JSON object matching the specified format. "
+    "Do not include any text before or after the JSON object. "
+    "Do not wrap it in markdown code fences."
+)
+
+
+def _get_fallback_provider(primary: str) -> str | None:
+    """Return the fallback provider name given the primary, or None if unavailable."""
+    # Explicitly configured fallback takes priority
+    if VASTU_FALLBACK_PROVIDER and VASTU_FALLBACK_PROVIDER != primary:
+        return VASTU_FALLBACK_PROVIDER
+
+    # Default logic: swap between the two supported providers
+    for candidate in VALID_VISION_PROVIDERS:
+        if candidate != primary:
+            return candidate
+    return None
+
+
+async def _call_provider_with_json_retry(
+    provider,
+    messages: list[AIMessage],
+    vision_input: VisionInput,
+) -> dict:
+    """
+    Call provider.complete_json() with one JSON-parse retry.
+
+    If the first call succeeds but returns unparseable JSON, retry once
+    with a corrective nudge appended to the last user message.
+    """
+    try:
+        return await provider.complete_json(
+            messages=messages,
+            vision_input=vision_input,
+        )
+    except AIProviderError as exc:
+        # Only retry on JSON parse failures, not on HTTP/auth errors
+        if "Failed to parse JSON" not in str(exc):
+            raise
+
+        logger.warning("JSON parse failed on first attempt; retrying with corrective nudge")
+
+        # Build nudged messages: append the nudge to the last user message
+        nudged_messages = list(messages)
+        last_idx = len(nudged_messages) - 1
+        if last_idx >= 0 and nudged_messages[last_idx].role == AIRole.USER:
+            original = nudged_messages[last_idx]
+            nudged_messages[last_idx] = AIMessage(
+                role=AIRole.USER,
+                content=original.content + _JSON_RETRY_NUDGE,
+            )
+
+        return await provider.complete_json(
+            messages=nudged_messages,
+            vision_input=vision_input,
+        )
 
 
 async def analyze_vastu(
@@ -54,7 +124,8 @@ async def analyze_vastu(
     """
     Analyze a floor plan image for Vastu compliance.
 
-    Single invocation to Vision LLM for both layout extraction and Vastu analysis.
+    Uses the primary AI provider with automatic retries and provider fallback
+    to ensure analysis completes successfully whenever possible.
 
     Args:
         image_base64: Base64-encoded floor plan image
@@ -64,96 +135,137 @@ async def analyze_vastu(
     Returns:
         VastuAnalyzeResponse with structured analysis and markdown report
     """
-    provider_name = request.provider or "gemini"
+    primary_name = request.provider or DEFAULT_VISION_PROVIDER
     analyzed_at = utc_now_iso()
 
     try:
-        # Get the appropriate AI provider
-        try:
-            provider_type = AIProviderType(provider_name.lower())
-        except ValueError:
-            logger.warning(f"Unknown provider '{provider_name}', falling back to Gemini")
-            provider_type = AIProviderType.GEMINI
-            provider_name = "gemini"
+        provider_type = AIProviderType(primary_name.lower())
+    except ValueError:
+        logger.warning(
+            "Unknown provider '%s', falling back to %s",
+            primary_name, DEFAULT_VISION_PROVIDER,
+        )
+        provider_type = AIProviderType(DEFAULT_VISION_PROVIDER)
+        primary_name = DEFAULT_VISION_PROVIDER
 
+    # Resolve fallback provider once
+    fallback_name = _get_fallback_provider(primary_name)
+
+    # Build messages and vision input (shared across attempts)
+    messages = [
+        AIMessage(role=AIRole.SYSTEM, content=VASTU_VISION_SYSTEM_PROMPT),
+        AIMessage(
+            role=AIRole.USER,
+            content=get_user_prompt(request.north_direction.value, request.notes or ""),
+        ),
+    ]
+    vision_input = VisionInput(
+        image_base64=image_base64,
+        mime_type=mime_type,
+    )
+
+    # --- Attempt with primary provider ---
+    result_json = await _attempt_analysis(
+        primary_name, provider_type, messages, vision_input, analyzed_at,
+    )
+
+    # --- Fallback to secondary provider if primary failed ---
+    if result_json is None and fallback_name:
+        logger.warning(
+            "Primary provider '%s' failed; falling back to '%s'",
+            primary_name, fallback_name,
+        )
+        try:
+            fallback_type = AIProviderType(fallback_name.lower())
+        except ValueError:
+            logger.error("Fallback provider '%s' is invalid", fallback_name)
+            return VastuAnalyzeResponse(
+                success=False,
+                error=f"Primary provider '{primary_name}' failed and fallback '{fallback_name}' is invalid",
+                provider_used=primary_name,
+                analyzed_at=analyzed_at,
+            )
+
+        result_json = await _attempt_analysis(
+            fallback_name, fallback_type, messages, vision_input, analyzed_at,
+            provider_used_label=f"{primary_name} -> {fallback_name}",
+        )
+
+    # --- Both providers failed ---
+    if result_json is None:
+        return VastuAnalyzeResponse(
+            success=False,
+            error=f"Analysis failed with primary provider '{primary_name}'"
+                  + (f" and fallback provider '{fallback_name}'" if fallback_name else ""),
+            provider_used=primary_name,
+            analyzed_at=analyzed_at,
+        )
+
+    # --- Build success response ---
+    provider_used_label = result_json.pop("_provider_used", primary_name)
+
+    analysis_result = _parse_analysis_result(result_json)
+    report_markdown = generate_markdown_report(result_json)
+
+    has_warnings = len(analysis_result.warnings) > 0
+    warning_count = len(analysis_result.warnings)
+    critical_warnings = any(
+        w.severity == AnalysisWarningSeverity.CRITICAL
+        for w in analysis_result.warnings
+    )
+
+    return VastuAnalyzeResponse(
+        success=True,
+        data=analysis_result,
+        report_markdown=report_markdown,
+        has_warnings=has_warnings,
+        warning_count=warning_count,
+        critical_warnings=critical_warnings,
+        provider_used=provider_used_label,
+        analyzed_at=analyzed_at,
+    )
+
+
+async def _attempt_analysis(
+    provider_name: str,
+    provider_type: AIProviderType,
+    messages: list[AIMessage],
+    vision_input: VisionInput,
+    analyzed_at: str,
+    provider_used_label: str | None = None,
+) -> dict | None:
+    """
+    Try to get a Vastu analysis from a single provider.
+
+    Returns the raw JSON dict on success (with ``_provider_used`` key injected),
+    or None on failure.
+    """
+    try:
         provider = get_ai_provider(provider_type)
 
         if not provider.supports_vision:
-            raise ValueError(f"Provider {provider_type.value} does not support vision")
+            logger.warning("Provider %s does not support vision; skipping", provider_name)
+            return None
 
-        # Build messages
-        messages = [
-            AIMessage(role=AIRole.SYSTEM, content=VASTU_VISION_SYSTEM_PROMPT),
-            AIMessage(
-                role=AIRole.USER,
-                content=get_user_prompt(request.north_direction.value, request.notes or "")
-            ),
-        ]
+        logger.info("Starting Vastu analysis with provider: %s", provider_name)
 
-        vision_input = VisionInput(
-            image_base64=image_base64,
-            mime_type=mime_type,
+        result_json = await _call_provider_with_json_retry(
+            provider, messages, vision_input,
         )
 
-        logger.info(f"Starting Vastu analysis with provider: {provider_name}")
-
-        # Single invocation to get both analysis and report
-        result_json = await provider.complete_json(
-            messages=messages,
-            vision_input=vision_input,
-        )
-
-        logger.info("Vastu analysis completed successfully")
-
-        # Parse and validate the structured result
-        analysis_result = _parse_analysis_result(result_json)
-
-        # Generate markdown report from structured data
-        report_markdown = generate_markdown_report(result_json)
-
-        # Calculate warning metadata
-        has_warnings = len(analysis_result.warnings) > 0
-        warning_count = len(analysis_result.warnings)
-        critical_warnings = any(
-            w.severity == AnalysisWarningSeverity.CRITICAL
-            for w in analysis_result.warnings
-        )
-
-        return VastuAnalyzeResponse(
-            success=True,
-            data=analysis_result,
-            report_markdown=report_markdown,
-            has_warnings=has_warnings,
-            warning_count=warning_count,
-            critical_warnings=critical_warnings,
-            provider_used=provider_name,
-            analyzed_at=analyzed_at,
-        )
+        logger.info("Vastu analysis completed successfully with provider: %s", provider_name)
+        result_json["_provider_used"] = provider_used_label or provider_name
+        return result_json
 
     except AIProviderError as e:
-        logger.error(f"AI provider error during Vastu analysis: {e}")
-        return VastuAnalyzeResponse(
-            success=False,
-            error=str(e),
-            provider_used=provider_name,
-            analyzed_at=analyzed_at,
-        )
+        logger.error("AI provider error with %s: %s", provider_name, e)
+        return None
     except ValueError as e:
-        logger.error(f"Validation error during Vastu analysis: {e}")
-        return VastuAnalyzeResponse(
-            success=False,
-            error=str(e),
-            provider_used=provider_name,
-            analyzed_at=analyzed_at,
-        )
+        logger.error("Validation error with %s: %s", provider_name, e)
+        return None
     except Exception as e:
-        logger.exception(f"Unexpected error during Vastu analysis: {e}")
-        return VastuAnalyzeResponse(
-            success=False,
-            error=f"Analysis failed: {str(e)}",
-            provider_used=provider_name,
-            analyzed_at=analyzed_at,
-        )
+        logger.exception("Unexpected error with provider %s: %s", provider_name, e)
+        return None
 
 
 def _parse_analysis_result(result_json: dict) -> VastuAnalysisResult:
@@ -259,7 +371,7 @@ def _parse_analysis_result(result_json: dict) -> VastuAnalysisResult:
 
     # Clamp score to 1-10 range
     score = result_json.get("vastu_score", 5)
-    score = max(1, min(10, int(score)))
+    score = max(1, min(10, round(score)))
 
     # Generate warnings based on analysis
     warnings, confidence = _generate_analysis_warnings(result_json, floor_plan, rooms)

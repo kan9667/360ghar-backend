@@ -7,7 +7,7 @@ and role-based authorization used across both User and Admin MCP servers.
 
 from __future__ import annotations
 
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 from mcp.server.auth.middleware.auth_context import get_access_token as get_auth_access_token
 
@@ -17,6 +17,10 @@ from app.models.enums import UserRole
 from app.services.user import get_user_by_id
 
 if TYPE_CHECKING:
+    from app.models.bookings import Booking
+    from app.models.pm_leases import Lease
+    from app.models.pm_maintenance import MaintenanceRequest
+    from app.models.properties import Property
     from app.models.users import User
 
 logger = get_logger(__name__)
@@ -29,9 +33,17 @@ async def get_db():
 
 
 def get_user_role(user: "User") -> UserRole:
-    """Get the UserRole enum from a user object."""
+    """Get the UserRole enum from a user object.
+
+    The model column now stores a UserRole enum directly.
+    Falls back to UserRole.user for objects that may still
+    expose role as a plain string.
+    """
+    role = user.role
+    if isinstance(role, UserRole):
+        return role
     try:
-        return UserRole(user.role)
+        return UserRole(role)
     except ValueError:
         return UserRole.user
 
@@ -111,16 +123,20 @@ async def get_user_from_mcp_context(db) -> Optional["User"]:
     return user
 
 
-def serialize_property_basic(prop: Any) -> dict:
+def serialize_property_basic(prop: "Property") -> dict:
     """Serialize a property object to basic dict for MCP responses."""
+    property_type = getattr(prop, "property_type", None)
+    purpose = getattr(prop, "purpose", None)
+    status = getattr(prop, "status", None)
+    management_status = getattr(prop, "management_status", None)
+    created_at = getattr(prop, "created_at", None)
+
     return {
         "id": prop.id,
         "title": prop.title,
-        "property_type": getattr(prop, "property_type", None).value
-        if getattr(prop, "property_type", None)
-        else None,
-        "purpose": getattr(prop, "purpose", None).value if getattr(prop, "purpose", None) else None,
-        "status": getattr(prop, "status", None).value if getattr(prop, "status", None) else None,
+        "property_type": property_type.value if property_type else None,
+        "purpose": purpose.value if purpose else None,
+        "status": status.value if status else None,
         "city": prop.city,
         "locality": prop.locality,
         "full_address": getattr(prop, "full_address", None),
@@ -133,17 +149,15 @@ def serialize_property_basic(prop: Any) -> dict:
         "area_sqft": getattr(prop, "area_sqft", None),
         "is_available": getattr(prop, "is_available", True),
         "is_managed": getattr(prop, "is_managed", False),
-        "management_status": getattr(prop, "management_status", None).value
-        if getattr(prop, "management_status", None)
-        else None,
+        "management_status": management_status.value if management_status else None,
         "latitude": prop.latitude,
         "longitude": prop.longitude,
         "main_image_url": prop.main_image_url,
-        "created_at": prop.created_at.isoformat() if getattr(prop, "created_at", None) else None,
+        "created_at": created_at.isoformat() if created_at else None,
     }
 
 
-def serialize_property_full(prop: Any) -> dict:
+def serialize_property_full(prop: "Property") -> dict:
     """Serialize a property object to full dict for MCP responses.
 
     Handles both SQLAlchemy models and Pydantic models.
@@ -152,6 +166,9 @@ def serialize_property_full(prop: Any) -> dict:
         return prop.model_dump()
 
     basic = serialize_property_basic(prop)
+
+    available_from = getattr(prop, "available_from", None)
+    updated_at = getattr(prop, "updated_at", None)
 
     amenities_data = []
     prop_amenities = getattr(prop, "property_amenities", None) or []
@@ -187,9 +204,7 @@ def serialize_property_full(prop: Any) -> dict:
             "video_tour_url": getattr(prop, "video_tour_url", None),
             "features": getattr(prop, "features", None),
             "tags": getattr(prop, "tags", None),
-            "available_from": getattr(prop, "available_from", None).isoformat()
-            if getattr(prop, "available_from", None)
-            else None,
+            "available_from": available_from.isoformat() if available_from else None,
             "minimum_stay_days": getattr(prop, "minimum_stay_days", None),
             "owner_name": getattr(prop, "owner_name", None),
             "builder_name": getattr(prop, "builder_name", None),
@@ -202,16 +217,19 @@ def serialize_property_full(prop: Any) -> dict:
                 for i in (getattr(prop, "images", None) or [])
             ],
             "amenities": amenities_data,
-            "updated_at": getattr(prop, "updated_at", None).isoformat()
-            if getattr(prop, "updated_at", None)
-            else None,
+            "updated_at": updated_at.isoformat() if updated_at else None,
         }
     )
     return basic
 
 
-def serialize_booking(booking: Any) -> dict:
+def serialize_booking(booking: "Booking") -> dict:
     """Serialize a booking object for MCP responses."""
+    booking_status = getattr(booking, "booking_status", None)
+    payment_status = getattr(booking, "payment_status", None)
+    cancellation_date = getattr(booking, "cancellation_date", None)
+    created_at = getattr(booking, "created_at", None)
+
     return {
         "id": booking.id,
         "booking_reference": getattr(booking, "booking_reference", None),
@@ -226,50 +244,46 @@ def serialize_booking(booking: Any) -> dict:
         "service_charges": float(getattr(booking, "service_charges", 0) or 0),
         "discount_amount": float(getattr(booking, "discount_amount", 0) or 0),
         "total_amount": float(getattr(booking, "total_amount", 0) or 0),
-        "booking_status": getattr(booking, "booking_status", None).value
-        if getattr(booking, "booking_status", None)
-        else None,
-        "payment_status": getattr(booking, "payment_status", None).value
-        if getattr(booking, "payment_status", None)
-        else None,
+        "booking_status": booking_status.value if booking_status else None,
+        "payment_status": payment_status.value if payment_status else None,
         "payment_method": getattr(booking, "payment_method", None),
         "special_requests": getattr(booking, "special_requests", None),
         "cancellation_reason": getattr(booking, "cancellation_reason", None),
-        "cancellation_date": getattr(booking, "cancellation_date", None).isoformat()
-        if getattr(booking, "cancellation_date", None)
-        else None,
-        "created_at": booking.created_at.isoformat()
-        if getattr(booking, "created_at", None)
-        else None,
+        "cancellation_date": cancellation_date.isoformat() if cancellation_date else None,
+        "created_at": created_at.isoformat() if created_at else None,
     }
 
 
-def serialize_lease(lease: Any) -> dict:
+def serialize_lease(lease: "Lease") -> dict:
     """Serialize a lease object for MCP responses."""
+    start_date = getattr(lease, "start_date", None)
+    end_date = getattr(lease, "end_date", None)
+    status = getattr(lease, "status", None)
+    created_at = getattr(lease, "created_at", None)
+    updated_at = getattr(lease, "updated_at", None)
+
     return {
         "id": lease.id,
         "property_id": lease.property_id,
         "owner_id": getattr(lease, "owner_id", None),
         "tenant_user_id": getattr(lease, "tenant_user_id", None),
-        "start_date": lease.start_date.isoformat() if getattr(lease, "start_date", None) else None,
-        "end_date": lease.end_date.isoformat() if getattr(lease, "end_date", None) else None,
+        "start_date": start_date.isoformat() if start_date else None,
+        "end_date": end_date.isoformat() if end_date else None,
         "monthly_rent": float(getattr(lease, "monthly_rent", 0) or 0),
         "security_deposit": float(getattr(lease, "security_deposit", 0) or 0),
-        "status": getattr(lease, "status", None).value if getattr(lease, "status", None) else None,
+        "status": status.value if status else None,
         "payment_due_day": getattr(lease, "payment_due_day", None),
         "grace_period_days": getattr(lease, "grace_period_days", None),
         "late_fee_amount": getattr(lease, "late_fee_amount", None),
         "late_fee_percentage": getattr(lease, "late_fee_percentage", None),
         "terms": getattr(lease, "lease_terms", None),
         "notes": getattr(lease, "special_clauses", None),
-        "created_at": lease.created_at.isoformat() if getattr(lease, "created_at", None) else None,
-        "updated_at": getattr(lease, "updated_at", None).isoformat()
-        if getattr(lease, "updated_at", None)
-        else None,
+        "created_at": created_at.isoformat() if created_at else None,
+        "updated_at": updated_at.isoformat() if updated_at else None,
     }
 
 
-def serialize_maintenance_request(req: Any) -> dict:
+def serialize_maintenance_request(req: "MaintenanceRequest") -> dict:
     """Serialize a maintenance request for MCP responses."""
     category = getattr(req, "category", None)
     category_value = category.value if hasattr(category, "value") else category
@@ -293,6 +307,10 @@ def serialize_maintenance_request(req: Any) -> dict:
 
     scheduled_for = getattr(req, "scheduled_for", None)
     completed_at = getattr(req, "completed_at", None)
+    estimated_cost = getattr(req, "estimated_cost", None)
+    actual_cost = getattr(req, "actual_cost", None)
+    created_at = getattr(req, "created_at", None)
+    updated_at = getattr(req, "updated_at", None)
 
     # Best-effort mapping to widget status values:
     # open|in_progress|scheduled|completed|cancelled
@@ -320,24 +338,18 @@ def serialize_maintenance_request(req: Any) -> dict:
         "status": status_value,
         "request_status": request_status_value,
         "work_order_status": work_order_status_value,
-        "estimated_cost": float(getattr(req, "estimated_cost", 0) or 0)
-        if getattr(req, "estimated_cost", None)
-        else None,
-        "actual_cost": float(getattr(req, "actual_cost", 0) or 0)
-        if getattr(req, "actual_cost", None)
-        else None,
+        "estimated_cost": float(estimated_cost or 0) if estimated_cost else None,
+        "actual_cost": float(actual_cost or 0) if actual_cost else None,
         "scheduled_date": scheduled_for.isoformat() if scheduled_for else None,
         "completed_at": completed_at.isoformat() if completed_at else None,
         "vendor_name": getattr(req, "vendor_name", None),
         "notes": getattr(req, "completion_notes", None),
-        "created_at": req.created_at.isoformat() if getattr(req, "created_at", None) else None,
-        "updated_at": getattr(req, "updated_at", None).isoformat()
-        if getattr(req, "updated_at", None)
-        else None,
+        "created_at": created_at.isoformat() if created_at else None,
+        "updated_at": updated_at.isoformat() if updated_at else None,
     }
 
 
-def serialize_user_basic(user: Any) -> dict:
+def serialize_user_basic(user: "User") -> dict:
     """Serialize a user object to basic dict for MCP responses."""
     return {
         "id": user.id,

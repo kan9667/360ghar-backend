@@ -153,10 +153,10 @@ async def get_public_tour(
                 session_id=session_id,
                 event_data={"referrer": request.headers.get("referer")},
             )
-            logger.info(f"Tracked view for tour {tour_id} from {device_type}")
+            logger.info("Tracked view for tour %s from %s", tour_id, device_type)
         except Exception as e:
             # Don't fail the request if analytics tracking fails
-            logger.warning(f"Failed to track analytics for tour {tour_id}: {e}")
+            logger.warning("Failed to track analytics for tour %s: %s", tour_id, e)
 
     # Hydrate floor plans into tour.settings for the viewer (floor plans are stored in a dedicated table).
     floor_plans_query = select(FloorPlan).where(FloorPlan.tour_id == tour_id).order_by(FloorPlan.floor_number)
@@ -329,7 +329,7 @@ async def track_tour_event(
 
         return {"status": "ok"}
     except Exception as e:
-        logger.error(f"Failed to track event for tour {tour_id}: {e}")
+        logger.error("Failed to track event for tour %s: %s", tour_id, e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to track event"
@@ -385,7 +385,7 @@ async def like_tour(
             increment_counts=False,
         )
     except Exception as e:
-        logger.warning(f"Failed to track like event for tour {tour_id}: {e}")
+        logger.warning("Failed to track like event for tour %s: %s", tour_id, e)
 
     return {"like_count": tour.like_count}
 
@@ -436,6 +436,6 @@ async def unlike_tour(
             increment_counts=False,
         )
     except Exception as e:
-        logger.warning(f"Failed to track unlike event for tour {tour_id}: {e}")
+        logger.warning("Failed to track unlike event for tour %s: %s", tour_id, e)
 
     return {"like_count": tour.like_count}

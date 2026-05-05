@@ -23,6 +23,14 @@ class CacheBackend(Protocol):
         """Store value in cache with optional TTL in seconds. Returns success status."""
         ...
 
+    async def get_and_delete(self, key: str) -> Optional[Any]:
+        """Atomically retrieve value and delete key. Returns None if not found or expired.
+
+        This prevents TOCTOU race conditions where a value is read and then
+        deleted in separate non-atomic steps.
+        """
+        ...
+
     async def delete(self, key: str) -> bool:
         """Delete a single key. Returns True if deleted, False if not found."""
         ...

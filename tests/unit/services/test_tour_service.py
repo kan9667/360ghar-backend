@@ -38,7 +38,7 @@ class TestTourServiceResponseLoading:
             is_public=False,
         )
 
-        with patch("app.services.tour.get_tour", new_callable=AsyncMock) as mock_get_tour:
+        with patch("app.services.tour.tours.get_tour", new_callable=AsyncMock) as mock_get_tour:
             mock_get_tour.return_value = expected
 
             result = await create_tour(db=db, user_id=123, data=tour_data)
@@ -77,7 +77,7 @@ class TestTourServiceResponseLoading:
 
         tour_update = TourUpdate(title="New Title")
 
-        with patch("app.services.tour.get_tour", new_callable=AsyncMock) as mock_get_tour:
+        with patch("app.services.tour.tours.get_tour", new_callable=AsyncMock) as mock_get_tour:
             mock_get_tour.side_effect = [initial, expected]
 
             result = await update_tour(

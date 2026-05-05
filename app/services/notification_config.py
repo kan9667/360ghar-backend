@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Optional, Set
 
 
 class NotificationChannel(str, Enum):
@@ -29,8 +28,8 @@ class NotificationPriority(str, Enum):
 class FrequencyCap:
     """Simple per-user frequency cap for a notification type."""
 
-    per_day: Optional[int] = None
-    per_week: Optional[int] = None
+    per_day: int | None = None
+    per_week: int | None = None
 
 
 @dataclass(frozen=True)
@@ -44,15 +43,15 @@ class NotificationTypeConfig:
     key: str
     category: NotificationCategory
     priority: NotificationPriority
-    allowed_channels: Set[NotificationChannel] = field(default_factory=set)
+    allowed_channels: set[NotificationChannel] = field(default_factory=set)
     default_ttl_seconds: int = 24 * 3600
-    frequency_cap: Optional[FrequencyCap] = None
+    frequency_cap: FrequencyCap | None = None
     # Optional key inside users.notification_settings JSON that must be truthy
     # for this type to be sent on marketing channels.
-    marketing_opt_in_key: Optional[str] = None
+    marketing_opt_in_key: str | None = None
 
 
-NOTIFICATION_TYPES: Dict[str, NotificationTypeConfig] = {
+NOTIFICATION_TYPES: dict[str, NotificationTypeConfig] = {
     # Transactional / event-based
     "booking_confirmed": NotificationTypeConfig(
         key="booking_confirmed",
@@ -242,6 +241,114 @@ NOTIFICATION_TYPES: Dict[str, NotificationTypeConfig] = {
         frequency_cap=FrequencyCap(per_day=1, per_week=7),
         marketing_opt_in_key="digest",
     ),
+    # Flatmates feature notifications
+    "flatmate_new_message": NotificationTypeConfig(
+        key="flatmate_new_message",
+        category=NotificationCategory.TRANSACTIONAL,
+        priority=NotificationPriority.HIGH,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=12 * 3600,
+        frequency_cap=FrequencyCap(per_day=None),
+    ),
+    "flatmate_new_match": NotificationTypeConfig(
+        key="flatmate_new_match",
+        category=NotificationCategory.TRANSACTIONAL,
+        priority=NotificationPriority.HIGH,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=24 * 3600,
+    ),
+    "flatmate_listing_approved": NotificationTypeConfig(
+        key="flatmate_listing_approved",
+        category=NotificationCategory.TRANSACTIONAL,
+        priority=NotificationPriority.NORMAL,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.EMAIL,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=3 * 24 * 3600,
+    ),
+    "flatmate_listing_rejected": NotificationTypeConfig(
+        key="flatmate_listing_rejected",
+        category=NotificationCategory.TRANSACTIONAL,
+        priority=NotificationPriority.HIGH,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.EMAIL,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=7 * 24 * 3600,
+    ),
+    "flatmate_account_suspended": NotificationTypeConfig(
+        key="flatmate_account_suspended",
+        category=NotificationCategory.SYSTEM,
+        priority=NotificationPriority.CRITICAL,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.EMAIL,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=7 * 24 * 3600,
+    ),
+    "flatmate_account_warned": NotificationTypeConfig(
+        key="flatmate_account_warned",
+        category=NotificationCategory.SYSTEM,
+        priority=NotificationPriority.HIGH,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.EMAIL,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=7 * 24 * 3600,
+    ),
+    "flatmate_report_actioned": NotificationTypeConfig(
+        key="flatmate_report_actioned",
+        category=NotificationCategory.SYSTEM,
+        priority=NotificationPriority.NORMAL,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=7 * 24 * 3600,
+    ),
+    "flatmate_report_dismissed": NotificationTypeConfig(
+        key="flatmate_report_dismissed",
+        category=NotificationCategory.SYSTEM,
+        priority=NotificationPriority.NORMAL,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=7 * 24 * 3600,
+    ),
+    "flatmate_visit_scheduled": NotificationTypeConfig(
+        key="flatmate_visit_scheduled",
+        category=NotificationCategory.TRANSACTIONAL,
+        priority=NotificationPriority.HIGH,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.SMS,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=24 * 3600,
+    ),
+    "flatmate_visit_confirmed": NotificationTypeConfig(
+        key="flatmate_visit_confirmed",
+        category=NotificationCategory.TRANSACTIONAL,
+        priority=NotificationPriority.HIGH,
+        allowed_channels={
+            NotificationChannel.PUSH,
+            NotificationChannel.SMS,
+            NotificationChannel.IN_APP,
+        },
+        default_ttl_seconds=24 * 3600,
+    ),
     # Fallback type for ad-hoc admin-triggered notifications
     "admin_broadcast": NotificationTypeConfig(
         key="admin_broadcast",
@@ -254,4 +361,3 @@ NOTIFICATION_TYPES: Dict[str, NotificationTypeConfig] = {
         default_ttl_seconds=7 * 24 * 3600,
     ),
 }
-

@@ -19,13 +19,17 @@ from app.models.users import User
 
 
 def _get_actor_role(actor) -> UserRole:
-    """Safely convert actor role to UserRole enum.
+    """Return the UserRole for the given actor.
 
-    Accepts both User (SQLAlchemy) and UserSchema (Pydantic) objects
-    since both expose a ``role`` attribute.
+    The model column now stores a UserRole enum directly.
+    Falls back to UserRole.user for Pydantic schemas that
+    may still expose role as a plain string.
     """
+    role = actor.role
+    if isinstance(role, UserRole):
+        return role
     try:
-        return UserRole(actor.role)
+        return UserRole(role)
     except ValueError:
         return UserRole.user
 

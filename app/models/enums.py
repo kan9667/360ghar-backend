@@ -20,6 +20,10 @@ class PropertyType(str, Enum):
     shop = "shop"
     warehouse = "warehouse"
 
+
+PG_FLATMATE_TYPES = {PropertyType.pg, PropertyType.flatmate}
+
+
 class PropertyPurpose(str, Enum):
     buy = "buy"
     rent = "rent"
@@ -64,6 +68,75 @@ class VisitStatus(str, Enum):
     completed = "completed"
     cancelled = "cancelled"
     rescheduled = "rescheduled"
+
+
+class FlatmatesMode(str, Enum):
+    room_poster = "room_poster"
+    seeker = "seeker"
+    co_hunter = "co_hunter"
+    open_to_both = "open_to_both"
+
+
+class FlatmatesProfileStatus(str, Enum):
+    draft = "draft"
+    pending_review = "pending_review"
+    active = "active"
+    paused = "paused"
+
+
+class SwipeTargetType(str, Enum):
+    property = "property"
+    user = "user"
+
+
+class SwipeAction(str, Enum):
+    pass_ = "pass"
+    like = "like"
+    super_like = "super_like"
+
+
+class VisitContext(str, Enum):
+    property_tour = "property_tour"
+    flatmate_meet = "flatmate_meet"
+
+
+class ConversationSource(str, Enum):
+    listing_interest = "listing_interest"
+    profile_match = "profile_match"
+
+
+class ConversationStatus(str, Enum):
+    active = "active"
+    archived = "archived"
+    blocked = "blocked"
+    closed = "closed"
+
+
+class UserMatchStatus(str, Enum):
+    active = "active"
+    unmatched = "unmatched"
+    blocked = "blocked"
+
+
+class MessageType(str, Enum):
+    text = "text"
+    image = "image"
+    system = "system"
+
+
+class UserReportReason(str, Enum):
+    spam = "spam"
+    fake_profile = "fake_profile"
+    abuse = "abuse"
+    inappropriate = "inappropriate"
+    other = "other"
+
+
+class UserReportStatus(str, Enum):
+    open = "open"
+    reviewed = "reviewed"
+    dismissed = "dismissed"
+    actioned = "actioned"
 
 class AgentType(str, Enum):
     general = "general"
@@ -266,11 +339,42 @@ class ScraperStatus(str, Enum):
     failed = "failed"
 
 class AuctionSource(str, Enum):
+    # Original
     sarfaesi = "sarfaesi"
     ibapi = "ibapi"
     mstc = "mstc"
     drt = "drt"
     ecourts = "ecourts"
+    # Central / Quasi-Govt
+    ibbi = "ibbi"
+    baanknet = "baanknet"
+    # Delhi
+    dda = "dda"
+    dfc_delhi = "dfc_delhi"
+    # Gurugram / Haryana
+    hsvp = "hsvp"
+    hsvp_procure247 = "hsvp_procure247"
+    dtcp = "dtcp"
+    # Meerut / UP
+    mda = "mda"
+    yeida = "yeida"
+    # Aggregators
+    bank_eauctions = "bank_eauctions"
+    eauctions_india = "eauctions_india"
+    auction_bazaar = "auction_bazaar"
+    eauction_dekho = "eauction_dekho"
+    findauction = "findauction"
+    findauction_prop = "findauction_prop"
+    auction_tiger = "auction_tiger"
+    # Individual Banks
+    sbi = "sbi"
+    pnb = "pnb"
+    bob = "bob"
+    canara = "canara"
+    hdfc = "hdfc"
+    icici = "icici"
+    union = "union"
+    yes_bank = "yes_bank"
 
 class GazetteType(str, Enum):
     land_acquisition = "land_acquisition"

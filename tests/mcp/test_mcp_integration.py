@@ -474,7 +474,7 @@ class TestMCPEndToEnd:
     async def test_complete_property_workflow(self):
         """Test complete property discovery and booking workflow."""
         from app.mcp.chatgpt.discovery_tools import discovery_search
-        from app.mcp.user_server import bookings_check_availability
+        from app.mcp.user.booking import bookings_check_availability
         from app.mcp.apps_sdk import AppsSDKToolResult
 
         search_fn = get_tool_fn(discovery_search)
@@ -495,13 +495,13 @@ class TestMCPEndToEnd:
                 assert isinstance(search_result, AppsSDKToolResult)
 
         # Step 2: Check availability (returns dict via MCPResponse, not AppsSDKToolResult)
-        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.user.booking._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1)
 
             with patch("app.services.booking.check_availability", new_callable=AsyncMock) as mock_avail:
                 mock_avail.return_value = {"available": True, "max_occupancy": 4}
 
-                with patch("app.mcp.user_server.get_db") as mock_db:
+                with patch("app.mcp.user.booking.get_db") as mock_db:
                     mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                     avail_result = await avail_fn(
@@ -519,7 +519,7 @@ class TestMCPEndToEnd:
     @pytest.mark.asyncio
     async def test_agent_property_management_workflow(self):
         """Test agent property management workflow."""
-        from app.mcp.admin_server import agent_properties_list
+        from app.mcp.admin.agent import agent_properties_list
 
         props_fn = get_tool_fn(agent_properties_list)
 
@@ -550,17 +550,17 @@ class TestMCPEndToEnd:
 
         mock_user_obj = MockUser()
 
-        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.admin.agent._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = mock_user_obj
 
             # list_managed_properties is in app.services.pm_properties
             with patch("app.services.pm_properties.list_managed_properties", new_callable=AsyncMock) as mock_list:
                 mock_list.return_value = []
 
-                with patch("app.mcp.admin_server.get_db") as mock_db:
+                with patch("app.mcp.admin.agent.get_db") as mock_db:
                     mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
-                    # List properties - admin_server returns dict via MCPResponse
+                    # List properties - admin server returns dict via MCPResponse
                     result = await props_fn()
                     assert isinstance(result, dict)
                     assert result.get("ok") is True
@@ -569,7 +569,7 @@ class TestMCPEndToEnd:
     @pytest.mark.asyncio
     async def test_owner_property_workflow(self):
         """Test owner managing their properties."""
-        from app.mcp.user_server import owner_properties_list, owner_properties_get
+        from app.mcp.user.owner import owner_properties_list, owner_properties_get
 
         list_fn = get_tool_fn(owner_properties_list)
         get_fn = get_tool_fn(owner_properties_get)
@@ -607,24 +607,24 @@ class TestMCPEndToEnd:
 
         # List properties - uses list_managed_properties from app.services.pm_properties
         # Returns dict via MCPResponse
-        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.user.owner._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = mock_user_obj
 
-            with patch("app.mcp.user_server.get_db") as mock_db_gen:
+            with patch("app.mcp.user.owner.get_db") as mock_db_gen:
                 mock_db_gen.return_value = AsyncIteratorMock([mock_db])
 
                 with patch("app.services.pm_properties.list_managed_properties", new_callable=AsyncMock) as mock_props:
                     mock_props.return_value = []
 
                     result = await list_fn()
-                    # user_server returns dict via MCPResponse
+                    # owner tools return dict via MCPResponse
                     assert isinstance(result, dict)
 
         # Get specific property - uses get_managed_property_detail
-        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.user.owner._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = mock_user_obj
 
-            with patch("app.mcp.user_server.get_db") as mock_db_gen:
+            with patch("app.mcp.user.owner.get_db") as mock_db_gen:
                 mock_db_gen.return_value = AsyncIteratorMock([mock_db])
 
                 with patch("app.services.pm_properties.get_managed_property_detail", new_callable=AsyncMock) as mock_get:
@@ -640,13 +640,13 @@ class TestMCPEndToEnd:
     @pytest.mark.asyncio
     async def test_tenant_workflow(self):
         """Test tenant viewing lease and rent status."""
-        from app.mcp.user_server import tenant_lease_current, tenant_rent_history
+        from app.mcp.user.tenant import tenant_lease_current, tenant_rent_history
 
         lease_fn = get_tool_fn(tenant_lease_current)
         rent_fn = get_tool_fn(tenant_rent_history)
 
         # View current lease - returns dict directly, not AppsSDKToolResult
-        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.user.tenant._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="user")
 
             # Mock the database session and queries
@@ -655,7 +655,7 @@ class TestMCPEndToEnd:
             mock_result.scalar_one_or_none.return_value = None  # No active lease
             mock_db_session.execute.return_value = mock_result
 
-            with patch("app.mcp.user_server.get_db") as mock_db:
+            with patch("app.mcp.user.tenant.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([mock_db_session])
 
                 result = await lease_fn()
@@ -664,7 +664,7 @@ class TestMCPEndToEnd:
                 assert "lease" in result or "error" in result
 
         # View rent history - returns dict directly
-        with patch("app.mcp.user_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.user.tenant._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="user")
 
             # Mock the database session and queries
@@ -673,7 +673,7 @@ class TestMCPEndToEnd:
             mock_lease_result.all.return_value = []
             mock_db_session.execute.return_value = mock_lease_result
 
-            with patch("app.mcp.user_server.get_db") as mock_db:
+            with patch("app.mcp.user.tenant.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([mock_db_session])
 
                 result = await rent_fn()

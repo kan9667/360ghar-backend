@@ -206,10 +206,10 @@ All endpoints are prefixed with `/api/v1`.
    # .venv\Scripts\activate
 
    # Install dependencies
-   pip install -r requirements.txt
+   uv sync
    ```
 
-   > **Note:** This project uses `uv` for dependency management. Dependencies are defined in both `pyproject.toml` (for uv) and `requirements.txt` (for pip).
+   > **Note:** This project uses `uv` for dependency management. Dependencies are defined in `pyproject.toml` and locked in `uv.lock`.
 
 4. **Set up environment variables:**
    ```bash

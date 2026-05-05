@@ -11,6 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.core.utils import utc_now_iso
 
 
+from app.core.constants import DEFAULT_VISION_PROVIDER
+
+
 class NorthDirection(str, Enum):
     """Direction of North in the floor plan image."""
     UP = "up"
@@ -78,7 +81,7 @@ class VastuAnalyzeRequest(BaseModel):
         description="Additional notes or concerns about the property"
     )
     provider: Optional[str] = Field(
-        default="gemini",
+        default=DEFAULT_VISION_PROVIDER,
         description="AI provider to use: 'gemini' or 'glm'"
     )
 

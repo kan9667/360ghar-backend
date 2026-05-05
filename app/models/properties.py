@@ -141,7 +141,10 @@ class Property(Base):
     )
     images: Mapped[List["PropertyImage"]] = relationship(back_populates="property", cascade="all, delete-orphan")
     property_amenities: Mapped[List["PropertyAmenity"]] = relationship(back_populates="property", cascade="all, delete-orphan")
-    swipes: Mapped[List["UserSwipe"]] = relationship(back_populates="property")
+    swipes: Mapped[List["UserSwipe"]] = relationship(
+        back_populates="property",
+        foreign_keys="UserSwipe.property_id",
+    )
     visits: Mapped[List["Visit"]] = relationship(back_populates="property")
     bookings: Mapped[List["Booking"]] = relationship(back_populates="property")
     # PM relationships (declared by name to avoid circular imports)
@@ -211,6 +214,19 @@ class Visit(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     property_id: Mapped[int] = mapped_column(ForeignKey("properties.id", ondelete="CASCADE"))
     agent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("agents.id"), nullable=True)
+    counterparty_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    conversation_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user_conversations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    match_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user_matches.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    visit_context: Mapped[str] = mapped_column(String(32), default="property_tour")
     scheduled_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     actual_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[VisitStatus] = mapped_column(SQLEnum(VisitStatus, name='visit_status'), default=VisitStatus.scheduled)
@@ -225,6 +241,7 @@ class Visit(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
 
-    user: Mapped["User"] = relationship(back_populates="visits")
+    user: Mapped["User"] = relationship(back_populates="visits", foreign_keys=[user_id])
+    counterparty_user: Mapped[Optional["User"]] = relationship(foreign_keys=[counterparty_user_id])
     property: Mapped["Property"] = relationship(back_populates="visits")
     agent: Mapped[Optional["Agent"]] = relationship(back_populates="visits")

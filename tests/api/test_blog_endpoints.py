@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.exc import SQLAlchemyError
 
 
 class TestBlogPostEndpoints:
@@ -47,6 +48,19 @@ class TestBlogPostEndpoints:
             )
 
             assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_list_blog_posts_returns_503_for_transient_db_error(self, client: AsyncClient):
+        with patch(
+            "app.api.api_v1.endpoints.blog.list_blog_posts",
+            new_callable=AsyncMock,
+        ) as mock_list:
+            mock_list.side_effect = SQLAlchemyError(
+                "(EDBHANDLEREXITED) connection to database closed"
+            )
+
+            response = await client.get("/api/v1/blog/posts")
+            assert response.status_code == 503
 
     @pytest.mark.asyncio
     async def test_get_blog_post(self, client: AsyncClient):

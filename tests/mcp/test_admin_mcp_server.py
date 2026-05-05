@@ -35,14 +35,14 @@ class TestAgentPropertyTools:
     @pytest.mark.asyncio
     async def test_agent_properties_list_authenticated(self, mock_mcp_context):
         """Test listing agent's portfolio properties."""
-        from app.mcp.admin_server import agent_properties_list
+        from app.mcp.admin.agent import agent_properties_list
 
         fn = get_tool_fn(agent_properties_list)
 
-        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.admin.agent._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="agent")
 
-            with patch("app.mcp.admin_server.get_db") as mock_db:
+            with patch("app.mcp.admin.agent.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn()
@@ -52,14 +52,14 @@ class TestAgentPropertyTools:
     @pytest.mark.asyncio
     async def test_agent_properties_list_unauthorized(self):
         """Test listing properties without agent role."""
-        from app.mcp.admin_server import agent_properties_list
+        from app.mcp.admin.agent import agent_properties_list
 
         fn = get_tool_fn(agent_properties_list)
 
-        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.admin.agent._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="user")  # Not an agent
 
-            with patch("app.mcp.admin_server.get_db") as mock_db:
+            with patch("app.mcp.admin.agent.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn()
@@ -74,14 +74,14 @@ class TestAgentLeaseTools:
     @pytest.mark.asyncio
     async def test_agent_leases_list(self, mock_mcp_context):
         """Test listing leases in agent's portfolio."""
-        from app.mcp.admin_server import agent_leases_list
+        from app.mcp.admin.agent import agent_leases_list
 
         fn = get_tool_fn(agent_leases_list)
 
-        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.admin.agent._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="agent")
 
-            with patch("app.mcp.admin_server.get_db") as mock_db:
+            with patch("app.mcp.admin.agent.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn()
@@ -91,14 +91,14 @@ class TestAgentLeaseTools:
     @pytest.mark.asyncio
     async def test_agent_leases_create(self, mock_mcp_context):
         """Test creating lease as agent."""
-        from app.mcp.admin_server import agent_leases_create
+        from app.mcp.admin.agent import agent_leases_create
 
         fn = get_tool_fn(agent_leases_create)
 
-        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.admin.agent._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="agent")
 
-            with patch("app.mcp.admin_server.get_db") as mock_db:
+            with patch("app.mcp.admin.agent.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn(
@@ -119,14 +119,14 @@ class TestAgentRentTools:
     @pytest.mark.asyncio
     async def test_agent_rent_list_due(self, mock_mcp_context):
         """Test listing overdue rent."""
-        from app.mcp.admin_server import agent_rent_list_due
+        from app.mcp.admin.agent import agent_rent_list_due
 
         fn = get_tool_fn(agent_rent_list_due)
 
-        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.admin.agent._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="agent")
 
-            with patch("app.mcp.admin_server.get_db") as mock_db:
+            with patch("app.mcp.admin.agent.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn()
@@ -136,14 +136,14 @@ class TestAgentRentTools:
     @pytest.mark.asyncio
     async def test_agent_rent_record_payment(self, mock_mcp_context):
         """Test recording rent payment as agent."""
-        from app.mcp.admin_server import agent_rent_record_payment
+        from app.mcp.admin.agent import agent_rent_record_payment
 
         fn = get_tool_fn(agent_rent_record_payment)
 
-        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.admin.agent._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="agent")
 
-            with patch("app.mcp.admin_server.get_db") as mock_db:
+            with patch("app.mcp.admin.agent.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn(
@@ -162,14 +162,14 @@ class TestAgentMaintenanceTools:
     @pytest.mark.asyncio
     async def test_agent_maintenance_list(self, mock_mcp_context):
         """Test listing maintenance requests."""
-        from app.mcp.admin_server import agent_maintenance_list
+        from app.mcp.admin.agent import agent_maintenance_list
 
         fn = get_tool_fn(agent_maintenance_list)
 
-        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.admin.agent._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="agent")
 
-            with patch("app.mcp.admin_server.get_db") as mock_db:
+            with patch("app.mcp.admin.agent.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn()
@@ -179,14 +179,14 @@ class TestAgentMaintenanceTools:
     @pytest.mark.asyncio
     async def test_agent_maintenance_update_status(self, mock_mcp_context):
         """Test updating maintenance request status."""
-        from app.mcp.admin_server import agent_maintenance_update_status
+        from app.mcp.admin.agent import agent_maintenance_update_status
 
         fn = get_tool_fn(agent_maintenance_update_status)
 
-        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.admin.agent._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="agent")
 
-            with patch("app.mcp.admin_server.get_db") as mock_db:
+            with patch("app.mcp.admin.agent.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn(
@@ -203,14 +203,14 @@ class TestAgentDashboardTools:
     @pytest.mark.asyncio
     async def test_agent_dashboard_overview(self, mock_mcp_context):
         """Test getting dashboard overview."""
-        from app.mcp.admin_server import agent_dashboard_overview
+        from app.mcp.admin.agent import agent_dashboard_overview
 
         fn = get_tool_fn(agent_dashboard_overview)
 
-        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.admin.agent._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="agent")
 
-            with patch("app.mcp.admin_server.get_db") as mock_db:
+            with patch("app.mcp.admin.agent.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn()
@@ -224,14 +224,14 @@ class TestAdminTools:
     @pytest.mark.asyncio
     async def test_admin_system_status(self, mock_mcp_context):
         """Test getting system status as admin."""
-        from app.mcp.admin_server import admin_system_status
+        from app.mcp.admin.admin import admin_system_status
 
         fn = get_tool_fn(admin_system_status)
 
-        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.admin.admin._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="admin")
 
-            with patch("app.mcp.admin_server.get_db") as mock_db:
+            with patch("app.mcp.admin.admin.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn()
@@ -241,14 +241,14 @@ class TestAdminTools:
     @pytest.mark.asyncio
     async def test_admin_system_status_non_admin(self):
         """Test system status access denied for non-admin."""
-        from app.mcp.admin_server import admin_system_status
+        from app.mcp.admin.admin import admin_system_status
 
         fn = get_tool_fn(admin_system_status)
 
-        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.admin.admin._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="user")
 
-            with patch("app.mcp.admin_server.get_db") as mock_db:
+            with patch("app.mcp.admin.admin.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn()
@@ -266,14 +266,14 @@ class TestAgentBookingTools:
     @pytest.mark.asyncio
     async def test_agent_bookings_list_all(self, mock_mcp_context):
         """Test listing all bookings as agent."""
-        from app.mcp.admin_server import agent_bookings_list_all
+        from app.mcp.admin.agent import agent_bookings_list_all
 
         fn = get_tool_fn(agent_bookings_list_all)
 
-        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.admin.agent._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="agent")
 
-            with patch("app.mcp.admin_server.get_db") as mock_db:
+            with patch("app.mcp.admin.agent.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn()
@@ -283,14 +283,14 @@ class TestAgentBookingTools:
     @pytest.mark.asyncio
     async def test_agent_bookings_update_status(self, mock_mcp_context):
         """Test updating booking status as agent."""
-        from app.mcp.admin_server import agent_bookings_update_status
+        from app.mcp.admin.agent import agent_bookings_update_status
 
         fn = get_tool_fn(agent_bookings_update_status)
 
-        with patch("app.mcp.admin_server._get_user", new_callable=AsyncMock) as mock_user:
+        with patch("app.mcp.admin.agent._get_user", new_callable=AsyncMock) as mock_user:
             mock_user.return_value = MagicMock(id=1, role="agent")
 
-            with patch("app.mcp.admin_server.get_db") as mock_db:
+            with patch("app.mcp.admin.agent.get_db") as mock_db:
                 mock_db.return_value = AsyncIteratorMock([MagicMock()])
 
                 result = await fn(

@@ -53,11 +53,18 @@ def _collect_python_modules(base: Path) -> list[str]:
 
 def _collect_endpoint_modules(root: Path) -> list[str]:
     endpoint_dir = root / "app" / "api" / "api_v1" / "endpoints"
-    return sorted(
-        path.stem
-        for path in endpoint_dir.glob("*.py")
-        if path.name != "__init__.py"
-    )
+    modules: list[str] = []
+    # Top-level .py files (e.g., flatmates.py, agents.py)
+    for path in endpoint_dir.glob("*.py"):
+        if path.name != "__init__.py":
+            modules.append(path.stem)
+    # Sub-package modules (e.g., oauth/authorization.py -> oauth/authorization)
+    for pkg_dir in endpoint_dir.iterdir():
+        if pkg_dir.is_dir() and pkg_dir.name != "__pycache__":
+            for py_file in pkg_dir.glob("*.py"):
+                if py_file.name != "__init__.py":
+                    modules.append(f"{pkg_dir.name}/{py_file.stem}")
+    return sorted(modules)
 
 
 def _extract_markdown_links(text: str) -> list[str]:

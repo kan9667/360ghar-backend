@@ -117,7 +117,7 @@ async def _perplexity_generate(topic: str) -> Dict[str, str]:
     async with httpx.AsyncClient(timeout=120) as client:  # Increased timeout for longer generation
         resp = await client.post(url, headers=headers, json=payload)
         if resp.status_code >= 400:
-            logger.error(f"Perplexity API error {resp.status_code}: {resp.text}")
+            logger.error("Perplexity API error %s: %s", resp.status_code, resp.text)
             raise ExternalServiceError(detail="Perplexity generation failed")
 
         data = resp.json()
@@ -126,17 +126,17 @@ async def _perplexity_generate(topic: str) -> Dict[str, str]:
     try:
         content = data["choices"][0]["message"]["content"]
     except Exception:
-        logger.error(f"Unexpected Perplexity response schema: {data}")
+        logger.error("Unexpected Perplexity response schema: %s", data)
         raise ExternalServiceError(detail="Invalid Perplexity response")
 
     try:
         parsed = json.loads(content)
     except Exception as e:
-        logger.error(f"Failed to parse Perplexity JSON content: {e} | content={content}")
+        logger.error("Failed to parse Perplexity JSON content: %s | content=%s", e, content)
         raise ExternalServiceError(detail="Invalid JSON from Perplexity")
 
     if not isinstance(parsed, dict):
-        logger.error(f"Perplexity JSON root is not an object: {parsed}")
+        logger.error("Perplexity JSON root is not an object: %s", parsed)
         raise ExternalServiceError(detail="Invalid Perplexity JSON shape")
 
     title = parsed.get("title")
@@ -178,7 +178,7 @@ async def _serpapi_image_search(query: str, count: int = 5) -> List[str]:
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(settings.SERPAPI_SEARCH_ENDPOINT, params=params)
         if resp.status_code >= 400:
-            logger.error(f"SerpAPI Google Images error {resp.status_code}: {resp.text}")
+            logger.error("SerpAPI Google Images error %s: %s", resp.status_code, resp.text)
             return []
         data = resp.json()
 
@@ -284,29 +284,29 @@ async def generate_bulk_blogs(db, *, count: int, actor) -> List[Dict[str, Any]]:
     async with httpx.AsyncClient(timeout=45) as client:
         resp = await client.post(url, headers=headers, json=payload)
         if resp.status_code >= 400:
-            logger.error(f"Perplexity topic generation error {resp.status_code}: {resp.text}")
+            logger.error("Perplexity topic generation error %s: %s", resp.status_code, resp.text)
             raise ExternalServiceError(detail="Perplexity topic generation failed")
         data = resp.json()
 
     try:
         content = data["choices"][0]["message"]["content"]
     except Exception:
-        logger.error(f"Unexpected Perplexity response schema for topics: {data}")
+        logger.error("Unexpected Perplexity response schema for topics: %s", data)
         raise ExternalServiceError(detail="Invalid Perplexity response")
 
     try:
         parsed = json.loads(content)
     except Exception as e:
-        logger.error(f"Failed to parse Perplexity topics JSON content: {e} | content={content}")
+        logger.error("Failed to parse Perplexity topics JSON content: %s | content=%s", e, content)
         raise ExternalServiceError(detail="Invalid JSON from Perplexity")
 
     if not isinstance(parsed, dict):
-        logger.error(f"Perplexity topics JSON root is not an object: {parsed}")
+        logger.error("Perplexity topics JSON root is not an object: %s", parsed)
         raise ExternalServiceError(detail="Invalid Perplexity JSON shape")
 
     raw_topics = parsed.get("topics") or []
     if not isinstance(raw_topics, list):
-        logger.error(f"Perplexity topics JSON 'topics' is not a list: {parsed}")
+        logger.error("Perplexity topics JSON 'topics' is not a list: %s", parsed)
         raise ExternalServiceError(detail="Invalid Perplexity topics JSON")
 
     topics: List[str] = [str(t).strip() for t in raw_topics if str(t).strip()]
@@ -330,5 +330,5 @@ async def generate_bulk_blogs(db, *, count: int, actor) -> List[Dict[str, Any]]:
         except BaseAPIException:
             raise
         except Exception as e:
-            logger.error(f"Failed to generate draft for topic '{t}': {e}")
+            logger.error("Failed to generate draft for topic '%s': %s", t, e)
     return results

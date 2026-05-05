@@ -3,17 +3,18 @@ Google Gemini AI Provider with Vision support.
 
 This module implements the AIProvider interface for Google's Gemini models,
 supporting both text and vision (image) inputs.
+All HTTP requests use the retry-enabled ``_make_request`` from the base class.
 """
 
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
 
-import httpx
+import json
+from typing import Any
 
 from app.core.logging import get_logger
 from app.services.ai.base import (
     AIMessage,
     AIProvider,
-    AIProviderConfig,
     AIProviderError,
     AIRole,
     VisionInput,
@@ -30,7 +31,6 @@ class GeminiProvider(AIProvider):
     - gemini-3-flash-preview (recommended for all tasks including vision)
     """
 
-    # Gemini API base URL
     API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
     @property
@@ -51,9 +51,9 @@ class GeminiProvider(AIProvider):
 
     def _build_contents(
         self,
-        messages: List[AIMessage],
-        vision_input: Optional[VisionInput] = None,
-    ) -> List[Dict[str, Any]]:
+        messages: list[AIMessage],
+        vision_input: VisionInput | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Build the contents array for Gemini API.
 
@@ -65,17 +65,14 @@ class GeminiProvider(AIProvider):
 
         for msg in messages:
             if msg.role == AIRole.SYSTEM:
-                # System messages are handled separately in Gemini
                 continue
 
             role = "user" if msg.role == AIRole.USER else "model"
             parts = []
 
-            # Add text content
             if msg.content:
                 parts.append({"text": msg.content})
 
-            # Add vision input only to user messages
             if vision_input and msg.role == AIRole.USER:
                 parts.append(
                     {
@@ -91,14 +88,14 @@ class GeminiProvider(AIProvider):
 
         return contents
 
-    def _extract_system_instruction(self, messages: List[AIMessage]) -> Optional[str]:
+    def _extract_system_instruction(self, messages: list[AIMessage]) -> str | None:
         """Extract system instruction from messages."""
         for msg in messages:
             if msg.role == AIRole.SYSTEM:
                 return msg.content
         return None
 
-    def _build_generation_config(self, json_mode: bool = False) -> Dict[str, Any]:
+    def _build_generation_config(self, json_mode: bool = False) -> dict[str, Any]:
         """Build generation configuration."""
         config = {
             "temperature": self.config.temperature,
@@ -110,108 +107,65 @@ class GeminiProvider(AIProvider):
 
     async def complete(
         self,
-        messages: List[AIMessage],
-        vision_input: Optional[VisionInput] = None,
+        messages: list[AIMessage],
+        vision_input: VisionInput | None = None,
     ) -> str:
-        """Generate a text completion from Gemini."""
+        """Generate a text completion from Gemini (with automatic retries)."""
         url = self._build_url()
-
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "contents": self._build_contents(messages, vision_input),
             "generationConfig": self._build_generation_config(json_mode=False),
         }
 
-        # Add system instruction if present
         system_instruction = self._extract_system_instruction(messages)
         if system_instruction:
-            payload["system_instruction"] = {"parts": [{"text": system_instruction}]}
+            payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
+        client = self._get_http_client()
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        response = await self._make_request(client, url, headers, payload)
         try:
-            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-                response = await client.post(url, json=payload)
-
-                if response.status_code >= 400:
-                    logger.error(f"Gemini API error {response.status_code}: {response.text}")
-                    raise AIProviderError(
-                        message=f"API request failed: {response.text}",
-                        provider=self.name,
-                        status_code=response.status_code,
-                        response_body=response.text,
-                    )
-
-                data = response.json()
-
-            # Extract text from response
-            text = self._extract_text_from_response(data)
-            return text
-
-        except httpx.TimeoutException as e:
-            logger.error(f"Gemini API timeout: {e}")
+            data = response.json()
+        except json.JSONDecodeError as exc:
             raise AIProviderError(
-                message="Request timed out",
+                message=f"API returned invalid JSON response body: {exc}",
                 provider=self.name,
-            )
-        except httpx.RequestError as e:
-            logger.error(f"Gemini API request error: {e}")
-            raise AIProviderError(
-                message=f"Request failed: {str(e)}",
-                provider=self.name,
-            )
+            ) from exc
+
+        return self._extract_text_from_response(data)
 
     async def complete_json(
         self,
-        messages: List[AIMessage],
-        vision_input: Optional[VisionInput] = None,
-        json_schema: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """Generate a structured JSON completion from Gemini."""
+        messages: list[AIMessage],
+        vision_input: VisionInput | None = None,
+        json_schema: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Generate a structured JSON completion from Gemini (with automatic retries)."""
         url = self._build_url()
-
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "contents": self._build_contents(messages, vision_input),
             "generationConfig": self._build_generation_config(json_mode=True),
         }
 
-        # Add system instruction if present
         system_instruction = self._extract_system_instruction(messages)
         if system_instruction:
-            payload["system_instruction"] = {"parts": [{"text": system_instruction}]}
+            payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
+        client = self._get_http_client()
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        response = await self._make_request(client, url, headers, payload)
         try:
-            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-                response = await client.post(url, json=payload)
-
-                if response.status_code >= 400:
-                    logger.error(f"Gemini API error {response.status_code}: {response.text}")
-                    raise AIProviderError(
-                        message=f"API request failed: {response.text}",
-                        provider=self.name,
-                        status_code=response.status_code,
-                        response_body=response.text,
-                    )
-
-                data = response.json()
-
-            # Extract text from response
-            text = self._extract_text_from_response(data)
-
-            # Parse JSON from response
-            return self._parse_json_response(text)
-
-        except httpx.TimeoutException as e:
-            logger.error(f"Gemini API timeout: {e}")
+            data = response.json()
+        except json.JSONDecodeError as exc:
             raise AIProviderError(
-                message="Request timed out",
+                message=f"API returned invalid JSON response body: {exc}",
                 provider=self.name,
-            )
-        except httpx.RequestError as e:
-            logger.error(f"Gemini API request error: {e}")
-            raise AIProviderError(
-                message=f"Request failed: {str(e)}",
-                provider=self.name,
-            )
+            ) from exc
 
-    def _extract_text_from_response(self, data: Dict[str, Any]) -> str:
+        text = self._extract_text_from_response(data)
+        return self._parse_json_response(text)
+
+    def _extract_text_from_response(self, data: dict[str, Any]) -> str:
         """Extract text content from Gemini API response."""
         try:
             candidates = data.get("candidates", [])
@@ -230,13 +184,12 @@ class GeminiProvider(AIProvider):
                     provider=self.name,
                 )
 
-            # Concatenate all text parts
             text_parts = [part.get("text", "") for part in parts if "text" in part]
             return "".join(text_parts)
 
         except (KeyError, IndexError) as e:
-            logger.error(f"Failed to extract text from Gemini response: {e}")
+            logger.error("Failed to extract text from Gemini response: %s", e)
             raise AIProviderError(
                 message=f"Invalid response structure: {e}",
                 provider=self.name,
-            )
+            ) from e

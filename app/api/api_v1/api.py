@@ -10,6 +10,7 @@ from app.api.api_v1.endpoints import (
     upload,
     core,
     blog,
+    flatmates,
     notifications,
     oauth,
     pm_dashboard,
@@ -54,6 +55,7 @@ api_router.include_router(core.router, prefix="", tags=["core"])
 api_router.include_router(blog.router, prefix="/blog", tags=["blog"])
 # Alias prefix for blogs to support /api/v1/blogs/* paths
 api_router.include_router(blog.router, prefix="/blogs", tags=["blog"])
+api_router.include_router(flatmates.router, prefix="/flatmates", tags=["flatmates"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 # OAuth endpoints are mounted at the root level for MCP compatibility
 api_router.include_router(oauth.router, tags=["oauth"])

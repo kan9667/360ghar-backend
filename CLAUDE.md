@@ -4,10 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Platform Overview
 
-360 Ghar is a unified real estate platform with five integrated modules:
+360 Ghar is a unified real estate platform with six integrated modules:
 
 - **360 Ghar Core**: Real estate marketplace for buying and renting properties with swipe-based discovery, property visits, and agent coordination (`/api/v1/properties`, `/swipes`, `/visits`, `/agents`)
 - **360 Stays**: Short-stay booking platform for hotels, vacation rentals, and temporary accommodations (`/api/v1/bookings`)
+- **360 Flatmates**: Flatmate/PG discovery with swipe-based matching, conversations, moderation, QnA, and visit scheduling (`/api/v1/flatmates`)
 - **Property Management**: Comprehensive property management system for landlords and property managers (`/api/v1/pm/*`)
 - **360 Virtual Tours**: Immersive 360° property tour platform with AI-powered hotspot generation and scene management (`/api/v1/tours`)
 - **360 Data Hub**: Real estate data aggregation with bank auctions, circle rates, court auctions, gazette, jamabandi, RERA projects/complaints, zoning, and neighbourhood data (`/api/v1/data-hub`)
@@ -21,7 +22,7 @@ python run.py                                      # Direct Python
 fastapi dev app/main.py --host 0.0.0.0 --port 8000 # Hot reload (FastAPI CLI)
 ```
 
-> **Note:** This project uses `uv` for dependency management. The `pyproject.toml` includes `[tool.setuptools.packages.find]` configuration to prevent "Multiple top-level packages discovered" errors during the build.
+> **Note:** This project uses `uv` for dependency management. Dependencies are declared in `pyproject.toml` and locked in `uv.lock`.
 
 ### Testing
 ```bash
@@ -76,7 +77,7 @@ GitHub Actions (`.github/workflows/tests.yml`) runs on push/PR to `main`/`develo
 
 ### Deployment
 - **Railway**: `railway.toml` with healthcheck on `/health`, `ON_FAILURE` restart policy
-- **Docker**: `Dockerfile` uses `python:3.12-slim` with `python run.py` entry point
+- **Docker**: `Dockerfile` uses `python:3.12-slim` with `uv sync` entry point
 
 ## Architecture Overview
 
@@ -85,20 +86,39 @@ GitHub Actions (`.github/workflows/tests.yml`) runs on push/PR to `main`/`develo
 app/
 ├── api/
 │   ├── api_v1/endpoints/   # REST endpoints (thin controllers)
-│   ├── api_v1/dependencies/ # Shared auth dependencies
+│   ├── api_v1/dependencies/ # Shared auth dependencies (get_current_user, get_current_agent, etc.)
 │   └── share.py            # Social share preview endpoints
 ├── services/               # Async business logic (main logic layer)
-│   ├── ai/                 # AI service providers (vastu, gemini, glm)
-│   ├── ai_agent/           # AI agent orchestration (tool bridge, conversation store)
-│   ├── blog_service/       # Blog content generation
-│   └── data_hub/           # Data hub scrapers (bank auctions, circle rates, RERA, etc.)
-├── repositories/           # Complex database queries (PropertyRepository, BaseRepository)
+│   ├── ai/                 # AI provider factory (gemini, glm) + vastu analyzer
+│   │   ├── providers/      # GeminiProvider, GLMProvider (httpx + tenacity retries)
+│   │   └── vastu/          # Vastu analyzer, prompts, schemas
+│   ├── ai_agent/           # Pydantic AI agent (agent_service, tool_bridge, conversation_store, system_prompt)
+│   ├── blog_service/       # Blog content generation (generator.py)
+│   ├── data_hub/           # 15 scraper modules (bank_auctions, circle_rates, rera_projects, etc.)
+│   ├── flatmates.py        # Flatmates matching, conversations, moderation, compatibility scoring
+│   ├── push_notification.py # FCM push dispatch for flatmates events
+│   ├── notification_config.py # Notification type registry (channel, priority, frequency caps)
+│   ├── notifications.py    # In-app notification CRUD + Supabase push
+│   ├── notification_dispatcher.py # Multi-channel dispatch (push/email/sms/in-app)
+│   ├── oauth_token_store.py # OAuth token/code storage via CacheManager
+│   ├── storage_paths.py    # Upload path generation + sanitization
+│   ├── image_processing.py # Thumbnail generation, EXIF extraction (Pillow)
+│   ├── custom_domain.py    # Custom domain DNS verification for tours
+│   └── seed_flatmates_data.py # E2E seed data for flatmates QA
+├── repositories/           # Complex database queries (BaseRepository, PropertyRepository, PropertyQueryBuilder)
 ├── models/                 # SQLAlchemy ORM models
+│   └── social.py           # UserMatch, UserConversation, UserMessage, UserBlock, UserReport, AppCatalog
 ├── schemas/                # Pydantic request/response validation
-├── mcp/                    # MCP servers (user_server, admin_server, chatgpt widgets)
+│   └── flatmates.py        # FlatmatesProfile, SwipeRequest, ConversationSummary, etc.
+├── mcp/                    # MCP servers (user_server, admin package, chatgpt widgets)
+│   ├── tool_ops/           # Shared tool business logic (properties, leases, rent, maintenance, bookings, dashboard)
+│   └── chatgpt/            # ChatGPT-specific tools (discovery, visits, PM) + response formatter
 ├── core/                   # Config, auth, database, exceptions, logging, websocket
-│   └── cache/              # Cache subsystem (memory + Redis backends, decorators)
-├── middleware/             # Rate limiting, security headers, trailing slash
+│   ├── cache/              # Cache subsystem (memory + Redis backends, decorators, PropertyCacheManager)
+│   ├── constants.py        # Vision provider defaults, valid providers
+│   ├── db_resilience.py    # Transient DB error detection + retry-with-rollback
+│   └── utils.py            # UTC helpers, timezone awareness
+├── middleware/             # Rate limiting (sliding window), security headers, request ID, request logging, trailing slash
 ├── utils/                  # Shared utilities (distance, validators)
 └── vector/                 # Vector embedding store, sync, backfill (pgvector)
 ```
@@ -144,26 +164,49 @@ async def get_properties(
 | API router | `app/api/api_v1/api.py` |
 | Database config | `app/core/database.py` |
 | Auth logic | `app/core/auth.py` |
+| Auth dependencies | `app/api/api_v1/dependencies/auth.py` |
 | Custom exceptions | `app/core/exceptions.py` |
 | Settings | `app/core/config.py` |
+| App constants | `app/core/constants.py` |
+| Core utilities | `app/core/utils.py` |
+| DB resilience | `app/core/db_resilience.py` |
+| WebSocket manager | `app/core/websocket.py` |
 | Cache subsystem | `app/core/cache/` |
 | Migrations | `supabase/migrations/` |
 | Vector embeddings | `app/vector/` |
 | Shared utilities | `app/utils/` |
 | Data hub scrapers | `app/services/data_hub/` |
 | Data hub scheduler | `app/services/data_hub_scheduler.py` |
-| AI agent orchestration | `app/services/ai_agent/` |
+| AI agent service | `app/services/ai_agent/agent_service.py` |
+| AI agent tool bridge | `app/services/ai_agent/tool_bridge.py` |
+| AI agent conversation store | `app/services/ai_agent/conversation_store.py` |
+| AI agent system prompt | `app/services/ai_agent/system_prompt.py` |
 | Blog auto-publish | `app/services/blog_auto_publish.py`, `app/services/blog_auto_publish_scheduler.py` |
+| Blog content generator | `app/services/blog_service/generator.py` |
+| Notification config | `app/services/notification_config.py` |
 | Notification dispatcher | `app/services/notification_dispatcher.py` |
+| Full notification service | `app/services/notifications.py` |
+| Push notification dispatch | `app/services/push_notification.py` |
 | Notification scheduler | `app/services/notification_scheduler.py` |
 | Vector sync scheduler | `app/services/vector_sync_scheduler.py` |
 | Vastu AI analyzer | `app/services/ai/vastu/analyzer.py` |
-| AI agent chat | `app/services/agent.py` (agent chat endpoint) |
+| AI agent chat endpoint | `app/api/api_v1/endpoints/agent_chat.py` |
 | Tour AI processing | `app/services/tour_ai.py` |
+| Tour service | `app/services/tour.py` |
 | Email service | `app/services/email.py` |
 | SMS service | `app/services/sms.py` |
 | Storage service | `app/services/storage.py` |
+| Storage path generation | `app/services/storage_paths.py` |
+| Image processing | `app/services/image_processing.py` |
+| Custom domain service | `app/services/custom_domain.py` |
+| Flatmates service | `app/services/flatmates.py` |
+| Agent service | `app/services/agent.py` |
+| Flatmates seed data | `app/seed_flatmates_data.py` |
+| OAuth token store | `app/services/oauth_token_store.py` |
+| PM authorization | `app/services/pm_authz.py` |
 | Social share previews | `app/api/share.py` |
+| WebSocket endpoints | `app/api/api_v1/endpoints/websocket.py` |
+| Social models | `app/models/social.py` |
 | Data hub model | `app/models/data_hub.py` |
 | Docs contract validator | `scripts/validate_docs_contracts.py` |
 
@@ -193,35 +236,75 @@ async def get_properties(
 
 ## Database Models
 
-**Core entities**: User, Property, Agent, AgentInteraction, Booking, Visit, UserSwipe, Amenity
+**Core entities**: User, Property, Agent, AgentInteraction, Booking, Visit, UserSwipe, Amenity, BugReport, Page, AppVersion, FAQ
 
 **Blog entities**: BlogPost, BlogCategory, BlogTag, BlogPostCategory, BlogPostTag
 
-**360 Virtual Tour entities**: Tour, Scene, Hotspot, TourAnalyticsEvent, AIJob, MediaFile, FloorPlan, TourBranding, CustomDomain, VideoMetadata
+**Social entities**: UserMatch, UserConversation, UserMessage, UserBlock, UserReport, AppCatalog, MatchQnAAnswer
+
+**360 Virtual Tour entities**: Tour, Scene, Hotspot, TourAnalyticsEvent, AIJob, MediaFile, UserSession, TourLocation, SearchIndex, CacheEntry, FloorPlan, TourBranding, CustomDomain, VideoMetadata
 
 **Property Management entities**: Lease, RentalApplication, RentalApplicationForm, RentCharge, RentPayment, Expense, MaintenanceRequest, Document, InspectionChecklist
 
 **AI entities**: AIConversation, AIConversationMessage
 
-**Data Hub entities**: BankAuction, CircleRate, CourtAuction, Gazette, Jamabandi, RERAProject, RERAComplaint, Zoning, Neighbourhood, BankRate, DataHubAlert
+**Data Hub entities**: BankAuction, CircleRate, CourtAuction, GazetteNotification, JamabandiCache, ReraProject, ReraComplaint, ZoningData, ColonyApproval, NeighbourhoodScore, BankRate, AuctionAlert, ScraperRun
 
 **Key relationships**:
-- User → Properties (as owner), Swipes, Visits, Bookings, Tours
+- User → Properties (as owner), Swipes, Visits, Bookings, Tours, Matches, Conversations, Messages, Blocks, Reports
 - Property → Images, Amenities (M2M via PropertyAmenity), Visits, Bookings
 - Agent → Users (1:many), Visits, AgentInteractions
 - Property (managed) → Leases, Tenants, Rent, Maintenance, Documents
+- UserMatch → User (M:M), Property (context)
+- UserConversation → User (M:M), Messages, Property (context)
 
 **Enums** (in `app/models/enums.py`):
 - PropertyType: house, apartment, builder_floor, room, villa, plot, condo, penthouse, studio, loft, pg, flatmate, office, shop, warehouse
 - PropertyPurpose: buy, rent, short_stay
+- PropertyStatus: available, sold, rented, under_offer, maintenance
+- PaymentStatus: pending, partial, paid, refunded, failed
 - BookingStatus: pending, confirmed, checked_in, checked_out, cancelled, completed
 - VisitStatus: scheduled, confirmed, completed, cancelled, rescheduled
-- LeaseStatus: draft, active, expired, terminated
-- MaintenanceCategory, MaintenanceUrgency, MaintenanceRequestStatus, WorkOrderStatus
-- TourStatus, SceneType, HotspotType, AIJobStatus
-- DocumentType, InspectionType, TenantStatus, ExpenseCategory
+- VisitContext: property_tour, flatmate_meet
+- FlatmatesMode: room_poster, seeker, co_hunter, open_to_both
+- FlatmatesProfileStatus: draft, pending_review, active, paused
+- SwipeTargetType: property, user
+- SwipeAction: pass, like, super_like
+- ConversationSource: listing_interest, profile_match
+- ConversationStatus: active, archived, blocked, closed
+- UserMatchStatus: active, unmatched, blocked
+- MessageType: text, image, system
+- UserReportReason: spam, fake_profile, abuse, inappropriate, other
+- UserReportStatus: open, reviewed, dismissed, actioned
+- ListingGenderPreference: any, male, female
+- ListingSharingType: private_room, shared_room
+- LeaseStatus: draft, pending_signature, active, expiring_soon, expired, terminated, renewed
+- ManagedPropertyStatus: draft, active, archived
+- TenantStatus: applicant, approved, active, notice_period, vacated, rejected
+- RentChargeStatus: pending, partial, paid, overdue, waived
+- ExpenseCategory: maintenance, repairs, insurance, property_tax, hoa, utilities, marketing, legal, other
+- MaintenanceCategory: plumbing, electrical, hvac, appliance, structural, pest_control, cleaning, other
+- MaintenanceUrgency: emergency, high, medium, low
+- MaintenanceRequestStatus: open, in_review, work_order_created, resolved, closed
+- WorkOrderStatus: created, assigned, in_progress, completed, closed, cancelled
+- DocumentType: lease_agreement, id_proof, address_proof, income_proof, inspection_report, receipt, invoice, property_deed, insurance_policy, other
+- InspectionType: move_in, move_out, routine
+- TourStatus: draft, published, archived
+- TourVisibility: private, unlisted, public
+- HotspotType: navigation, info, audio, video, link, custom
+- BugType: ui_bug, functionality_bug, performance_issue, crash, feature_request, other
+- BugSeverity: low, medium, high, critical
+- BugStatus: open, in_progress, resolved, closed
+- PageFormat: html, markdown, json
+- ImageCategory: room, hall, kitchen, bathroom, balcony, terrace, garden, parking, entrance, exterior, interior, others, floor_plan
+- ScraperStatus: running, success, partial, failed
+- AuctionSource: sarfaesi, ibapi, mstc, drt, ecourts
+- GazetteType: land_acquisition, rate_revision, policy, clu_change
+- ComplaintNature: delay, quality, refund, compensation, other
 - UserRole: user, agent, admin
-- AgentType, ExperienceLevel
+- AgentType: general, specialist, senior
+- ExperienceLevel: beginner, intermediate, expert
+- `PG_FLATMATE_TYPES` constant: `{PropertyType.pg, PropertyType.flatmate}`
 
 ## Test Structure
 
@@ -229,20 +312,27 @@ async def get_properties(
 tests/
 ├── api/                    # Endpoint integration tests
 ├── unit/
-│   ├── core/               # Auth, config unit tests
-│   ├── models/             # Model/enum tests
-│   ├── schemas/            # Schema validation tests
-│   ├── services/           # Service layer unit tests
-│   └── mcp/                # MCP server tests
-├── integration/            # Full-stack DB integration tests (PostGIS, FTS)
-├── e2e/                    # End-to-end flow tests
-├── pm/                     # Property management tests
-├── middleware/             # Middleware tests
-└── fixtures/               # Shared fixtures (auth, factories, mocks, data)
+│   ├── api/                # Agent chat endpoint unit tests
+│   ├── core/               # Auth, config, cache, exceptions, logging, utils, websocket, db_resilience, constants
+│   ├── models/             # Model/enum tests (booking, data_hub, property, social, tour, user)
+│   ├── schemas/            # Schema validation tests (ai_agent, booking, common, flatmates, property, user, visit)
+│   ├── services/           # Service layer unit tests (agent, blog, booking, notification, pm, property, storage, swipe, tour, user, visit)
+│   │   ├── ai/             # AI provider tests
+│   │   ├── ai_agent/       # AI agent service tests
+│   │   └── pm/             # PM service tests
+│   ├── mcp/                # MCP server tests
+│   ├── repositories/       # Repository tests (base, property, query builder)
+│   └── utils/              # Utility tests (distance, validators)
+├── integration/            # Full-stack DB integration tests (PostGIS, FTS, property search)
+│   └── services/           # Integration service tests
+├── e2e/                    # End-to-end flow tests (booking, PM lifecycle, property listing, user registration)
+├── pm/                     # Property management authz + rent tests
+├── middleware/             # Middleware tests (rate limit, security, trailing slash)
+└── fixtures/               # Shared fixtures (auth, common, data, factories, mocks)
 ```
 
 Run with coverage: `pytest tests/ --cov=app --cov-report=html`
-Dev dependencies (pytest, ruff, mypy) are in the `dev` optional group: `pip install ".[dev]"`
+Dev dependencies (pytest, ruff, mypy) are in the `dev` optional group: `uv sync --extra dev`
 
 ## Security
 
@@ -250,8 +340,15 @@ Dev dependencies (pytest, ruff, mypy) are in the `dev` optional group: `pip inst
 - Phone as primary identifier
 - Role-based access: user, agent, admin
 - Backend does not provide `/api/v1/auth/*` user-session endpoints; clients own login/refresh/logout via Supabase SDK
-- Rate limiting: 100 req/min global
+- Rate limiting: 100 req/min global (sliding window via `app/middleware/rate_limit.py`)
 - Input validation via Pydantic schemas
+- API key validation via `VALID_API_KEYS` setting
+- OAuth 2.1 token storage via CacheManager (Redis/memory backends, `app/services/oauth_token_store.py`)
+- FCM push notifications via Google service account credentials (`app/services/push_notification.py`)
+- Security headers middleware (`app/middleware/security.py`): X-Content-Type-Options, X-Frame-Options, CSP, HSTS
+- Request ID middleware for distributed tracing (`app/middleware/security.py`)
+- Request logging middleware for all routes including MCP (`app/middleware/security.py`)
+- Sentry integration for error tracking and performance monitoring
 
 ## API Documentation
 
@@ -260,6 +357,10 @@ When running locally:
 - ReDoc: http://localhost:8000/api/v1/redoc
 - OpenAPI YAML: http://localhost:8000/api/v1/openapi.yaml
 - Health: http://localhost:8000/health
+- WebSocket (AI jobs): `ws://localhost:8000/ws/jobs/{job_id}?token=...`
+- WebSocket (notifications): `ws://localhost:8000/ws/notifications?token=...`
+- AI Agent chat (auth): `POST /api/v1/agent/chat`
+- AI Agent chat (guest): `POST /api/v1/agent/chat-public`
 
 ## MCP Server
 
@@ -336,6 +437,9 @@ A single server URL serves all MCP clients with no per-client adapters:
 - `bookings_cancel` - Cancel a booking
 - `bookings_check_availability` - Check property availability
 - `bookings_get_pricing` - Get pricing information
+
+**System Tools**:
+- `user_system_status` - Check auth status and available features
 
 ### Admin MCP Tools (`/mcp-admin`)
 
@@ -473,8 +577,9 @@ The MCP servers are compatible with the OpenAI Apps SDK and the MCP Apps standar
 | Purpose | Location |
 |---------|----------|
 | User MCP server | `app/mcp/user_server.py` |
-| Admin MCP server | `app/mcp/admin_server.py` |
+| Admin MCP server | `app/mcp/admin/server.py` |
 | Apps SDK helpers | `app/mcp/apps_sdk.py` |
+| Shared tool business logic | `app/mcp/tool_ops/` |
 | Multi-client tools | `app/mcp/chatgpt/` |
 | Response formatters | `app/mcp/chatgpt/response_formatter.py` |
 | Widget registry | `app/mcp/chatgpt/__init__.py` |
@@ -482,8 +587,9 @@ The MCP servers are compatible with the OpenAI Apps SDK and the MCP Apps standar
 | Widget theme support | `chatgpt-widgets/src/utils/theme.ts` |
 | Built widget HTML | `chatgpt-widgets/dist/` |
 | Shared utilities | `app/mcp/utils.py` |
-| Validation schemas | `app/mcp/validation.py` |
 | MCP error helpers | `app/mcp/errors.py` |
 | Auth provider | `app/mcp/auth_provider.py` |
 | OAuth endpoints | `app/api/api_v1/endpoints/oauth.py` |
 | Authorization | `app/services/pm_authz.py` |
+
+> **Note on `tool_ops/`**: These modules contain the shared business logic (service calls, DB queries, authorization, serialization) used by both MCP servers and the AI agent tool bridge. When adding new MCP tools, implement the logic in `app/mcp/tool_ops/` first, then wire it through both `user_server.py`/`admin/` and `tool_bridge.py`.

@@ -44,6 +44,8 @@ async def _can_access_visit(
 ) -> bool:
     if visit.user_id == current_user.id:
         return True
+    if visit.counterparty_user_id == current_user.id:
+        return True
     if current_user.role == UserRole.admin.value:
         return True
     return await _agent_can_access_visit(current_user, visit, db)

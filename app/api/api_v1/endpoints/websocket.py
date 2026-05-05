@@ -46,7 +46,7 @@ async def resolve_websocket_user_id(token: str, db: AsyncSession) -> Optional[in
 
         return int(user.id)
     except Exception as e:
-        logger.warning(f"Token verification failed: {e}")
+        logger.warning("Token verification failed: %s", e)
         return None
 
 
@@ -128,9 +128,9 @@ async def websocket_job_updates(
                     break
 
     except WebSocketDisconnect:
-        logger.debug(f"WebSocket disconnected for job {job_id}")
+        logger.debug("WebSocket disconnected for job %s", job_id)
     except Exception as e:
-        logger.error(f"WebSocket error for job {job_id}: {e}")
+        logger.error("WebSocket error for job %s: %s", job_id, e)
     finally:
         await manager.disconnect_job(websocket, job_id)
 
@@ -195,9 +195,9 @@ async def websocket_user_updates(
                     break
 
     except WebSocketDisconnect:
-        logger.debug(f"WebSocket disconnected for user {user_id}")
+        logger.debug("WebSocket disconnected for user %s", user_id)
     except Exception as e:
-        logger.error(f"WebSocket error for user {user_id}: {e}")
+        logger.error("WebSocket error for user %s: %s", user_id, e)
     finally:
         await manager.disconnect_user(websocket, user_id)
 
@@ -253,8 +253,8 @@ async def websocket_tour_updates(
                     break
 
     except WebSocketDisconnect:
-        logger.debug(f"WebSocket disconnected for tour {tour_id}")
+        logger.debug("WebSocket disconnected for tour %s", tour_id)
     except Exception as e:
-        logger.error(f"WebSocket error for tour {tour_id}: {e}")
+        logger.error("WebSocket error for tour %s: %s", tour_id, e)
     finally:
         await manager.disconnect_job(websocket, connection_key)

@@ -83,10 +83,10 @@ def cached(
             try:
                 cached_value = await cache.get(cache_key)
                 if cached_value is not None:
-                    logger.debug(f"Cache hit: {cache_key}")
+                    logger.debug("Cache hit: %s", cache_key)
                     return cached_value
             except Exception as e:
-                logger.warning(f"Cache get error: {e}")
+                logger.warning("Cache get error: %s", e)
 
             # Execute function
             result = await func(*args, **kwargs)
@@ -104,9 +104,9 @@ def cached(
                     # Serialize Pydantic models
                     cache_value = _serialize_for_cache(result)
                     await cache.set(cache_key, cache_value, ttl)
-                    logger.debug(f"Cache set: {cache_key}")
+                    logger.debug("Cache set: %s", cache_key)
                 except Exception as e:
-                    logger.warning(f"Cache set error: {e}")
+                    logger.warning("Cache set error: %s", e)
 
             return result
 
@@ -144,11 +144,9 @@ def invalidate_cache(patterns: Union[str, List[str]]) -> Callable:
                 try:
                     deleted = await cache.delete_pattern(pattern)
                     if deleted > 0:
-                        logger.debug(
-                            f"Invalidated {deleted} keys for pattern: {pattern}"
-                        )
+                        logger.debug("Invalidated %s keys for pattern: %s", deleted, pattern)
                 except Exception as e:
-                    logger.warning(f"Cache invalidation error for {pattern}: {e}")
+                    logger.warning("Cache invalidation error for %s: %s", pattern, e)
 
             return result
 

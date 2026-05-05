@@ -213,7 +213,7 @@ class TestSendMessage:
 
         message = {"message": {"token": "test_token"}}
 
-        with patch("app.services.notifications._access_token", return_value="test_token"):
+        with patch("app.services.notifications.fcm._access_token", return_value="test_token"):
             result = await send_message(message)
 
             assert "name" in result
@@ -228,7 +228,7 @@ class TestRegisterDeviceToken:
         from app.services.notifications import register_device_token
 
         with patch(
-            "app.services.notifications.get_supabase_service_client",
+            "app.services.notifications.helpers.get_supabase_service_client",
             return_value=mock_supabase_client,
         ):
             result = await register_device_token(
@@ -253,7 +253,7 @@ class TestListNotificationsForUser:
         ]
 
         with patch(
-            "app.services.notifications.get_supabase_service_client",
+            "app.services.notifications.helpers.get_supabase_service_client",
             return_value=mock_supabase_client,
         ):
             result = await list_notifications_for_user("user_123", limit=10)
@@ -278,10 +278,10 @@ class TestSendToToken:
         ]
 
         with patch(
-            "app.services.notifications.get_supabase_service_client",
+            "app.services.notifications.helpers.get_supabase_service_client",
             return_value=mock_supabase_client,
         ):
-            with patch("app.services.notifications._access_token", return_value="test_token"):
+            with patch("app.services.notifications.fcm._access_token", return_value="test_token"):
                 result = await send_to_token(
                     token="device_token",
                     title="Test Title",
@@ -302,7 +302,7 @@ class TestSendToUser:
         mock_supabase_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
 
         with patch(
-            "app.services.notifications.get_supabase_service_client",
+            "app.services.notifications.helpers.get_supabase_service_client",
             return_value=mock_supabase_client,
         ):
             result = await send_to_user(
@@ -328,10 +328,10 @@ class TestSendToTopic:
         ]
 
         with patch(
-            "app.services.notifications.get_supabase_service_client",
+            "app.services.notifications.helpers.get_supabase_service_client",
             return_value=mock_supabase_client,
         ):
-            with patch("app.services.notifications._access_token", return_value="test_token"):
+            with patch("app.services.notifications.fcm._access_token", return_value="test_token"):
                 result = await send_to_topic(
                     topic="all_users",
                     title="Announcement",
@@ -362,7 +362,7 @@ class TestMarkDeliveryOpened:
         mock_supabase_client.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
 
         with patch(
-            "app.services.notifications.get_supabase_service_client",
+            "app.services.notifications.helpers.get_supabase_service_client",
             return_value=mock_supabase_client,
         ):
             result = await mark_delivery_opened("delivery_123", user_supabase_id="user_123")

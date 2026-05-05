@@ -40,7 +40,7 @@ class ConnectionManager:
             if job_id not in self.job_connections:
                 self.job_connections[job_id] = set()
             self.job_connections[job_id].add(websocket)
-        logger.debug(f"WebSocket connected for job {job_id}")
+        logger.debug("WebSocket connected for job %s", job_id)
 
     async def connect_user(self, websocket: WebSocket, user_id: int) -> None:
         """Connect a websocket to receive updates for a user."""
@@ -49,7 +49,7 @@ class ConnectionManager:
             if user_id not in self.user_connections:
                 self.user_connections[user_id] = set()
             self.user_connections[user_id].add(websocket)
-        logger.debug(f"WebSocket connected for user {user_id}")
+        logger.debug("WebSocket connected for user %s", user_id)
 
     async def disconnect_job(self, websocket: WebSocket, job_id: str) -> None:
         """Disconnect a websocket from job updates."""
@@ -58,7 +58,7 @@ class ConnectionManager:
                 self.job_connections[job_id].discard(websocket)
                 if not self.job_connections[job_id]:
                     del self.job_connections[job_id]
-        logger.debug(f"WebSocket disconnected from job {job_id}")
+        logger.debug("WebSocket disconnected from job %s", job_id)
 
     async def disconnect_user(self, websocket: WebSocket, user_id: int) -> None:
         """Disconnect a websocket from user updates."""
@@ -67,7 +67,7 @@ class ConnectionManager:
                 self.user_connections[user_id].discard(websocket)
                 if not self.user_connections[user_id]:
                     del self.user_connections[user_id]
-        logger.debug(f"WebSocket disconnected from user {user_id}")
+        logger.debug("WebSocket disconnected from user %s", user_id)
 
     async def send_job_update(
         self,
@@ -99,7 +99,7 @@ class ConnectionManager:
                 if websocket.client_state == WebSocketState.CONNECTED:
                     await websocket.send_text(message)
             except Exception as e:
-                logger.warning(f"Failed to send job update: {e}")
+                logger.warning("Failed to send job update: %s", e)
                 dead_connections.append(websocket)
 
         # Clean up dead connections
@@ -134,7 +134,7 @@ class ConnectionManager:
                 if websocket.client_state == WebSocketState.CONNECTED:
                     await websocket.send_text(message)
             except Exception as e:
-                logger.warning(f"Failed to send user notification: {e}")
+                logger.warning("Failed to send user notification: %s", e)
                 dead_connections.append(websocket)
 
         for ws in dead_connections:

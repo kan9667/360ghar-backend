@@ -42,7 +42,7 @@ def _embed_one(genai, model: str, text: str, *, task_type: str = "retrieval_docu
             return resp.embedding.values  # type: ignore[attr-defined]
         except Exception as e:  # noqa: BLE001
             last_err = e
-            logger.warning(f"Gemini embed retry due to error: {e}")
+            logger.warning("Gemini embed retry due to error: %s", e)
             import time
             time.sleep(delay)
             delay = min(8.0, delay * 2.0)

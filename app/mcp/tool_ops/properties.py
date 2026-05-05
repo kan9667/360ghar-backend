@@ -235,7 +235,7 @@ async def get_property_detail(
     try:
         result = await get_managed_property_detail(db, actor=actor_schema, property_id=property_id)
     except Exception as e:
-        logger.error(f"Error getting property detail: {e}", exc_info=True)
+        logger.error("Error getting property detail: %s", e, exc_info=True)
         return {"error": True, "message": f"Property {property_id} not found."}
 
     prop = result["property"]

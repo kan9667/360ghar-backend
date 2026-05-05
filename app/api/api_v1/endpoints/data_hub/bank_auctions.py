@@ -1,0 +1,236 @@
+"""Bank and court auction endpoints."""
+
+from datetime import date as date_type
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import and_, func, select, union_all
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.models.data_hub import BankAuction, CourtAuction
+from app.schemas.data_hub import (
+    AuctionListResponse,
+    BankAuctionResponse,
+    CourtAuctionResponse,
+)
+
+from .helpers import _meta_from_table, _paginate
+
+router = APIRouter()
+
+
+@router.get("/auctions/banks", response_model=list[str])
+async def list_auction_banks(db: AsyncSession = Depends(get_db)):
+    """List distinct bank names from bank auctions."""
+    from sqlalchemy import distinct
+
+    result = await db.execute(
+        select(distinct(BankAuction.bank_name)).order_by(BankAuction.bank_name)
+    )
+    return [r for r in result.scalars().all() if r]
+
+
+@router.get("/auctions/cities", response_model=list[str])
+async def get_auction_cities(db: AsyncSession = Depends(get_db)):
+    """Return distinct city values from bank_auctions + court_auctions."""
+    bank_cities = select(BankAuction.city).where(BankAuction.is_active)
+    court_cities = select(CourtAuction.city).where(CourtAuction.is_active)
+
+    combined = union_all(bank_cities, court_cities).subquery()
+    stmt = select(func.distinct(combined.c.city)).order_by(combined.c.city)
+    result = await db.execute(stmt)
+    return [row[0] for row in result.all() if row[0]]
+
+
+@router.get("/auctions/source-categories")
+async def get_auction_source_categories(db: AsyncSession = Depends(get_db)):
+    """Return grouped source metadata with counts."""
+    # Count auctions per source
+    stmt = select(
+        BankAuction.source,
+        func.count(BankAuction.id).label("count")
+    ).where(BankAuction.is_active).group_by(BankAuction.source)
+    result = await db.execute(stmt)
+    source_counts = {str(row[0]): row[1] for row in result.all()}
+
+    # Categorize sources
+    categories = {
+        "central": [
+            {"source": "ibapi", "label": "IBAPI", "url": "https://ibapi.in"},
+            {"source": "ibbi", "label": "IBBI", "url": "https://ibbi.gov.in/liquidation-auction-notices"},
+            {"source": "baanknet", "label": "BaankNet/eBKray", "url": "https://baanknet.com"},
+            {"source": "mstc", "label": "MSTC", "url": "https://mstcecommerce.com"},
+        ],
+        "delhi": [
+            {"source": "dda", "label": "DDA e-Services", "url": "https://eservices.dda.org.in"},
+            {"source": "dfc_delhi", "label": "Delhi Financial Corp", "url": "https://dfc.delhi.gov.in/dfc/public-auction"},
+            {"source": "drt", "label": "DRT Delhi", "url": "https://drt.gov.in"},
+            {"source": "ecourts", "label": "eCourts", "url": "https://ecourts.gov.in"},
+        ],
+        "gurgaon": [
+            {"source": "hsvp", "label": "HSVP e-Auction", "url": "https://eauction.hsvphry.org.in"},
+            {"source": "hsvp_procure247", "label": "HSVP Procure247", "url": "https://hsvp.procure247.com"},
+            {"source": "dtcp", "label": "DTCP Haryana", "url": "https://tcpharyana.gov.in"},
+        ],
+        "meerut": [
+            {"source": "mda", "label": "MDA Meerut", "url": "https://mdameerut.in/auctions.php"},
+            {"source": "yeida", "label": "YEIDA", "url": "https://yamunaexpresswayauthority.com"},
+        ],
+        "aggregators": [
+            {"source": "bank_eauctions", "label": "BankEAuctions", "url": "https://bankeauctions.com"},
+            {"source": "eauctions_india", "label": "eAuctionsIndia", "url": "https://eauctionsindia.com"},
+            {"source": "auction_bazaar", "label": "AuctionBazaar", "url": "https://auctionbazaar.com"},
+            {"source": "eauction_dekho", "label": "eAuctionDekho", "url": "https://eauctiondekho.com"},
+            {"source": "findauction", "label": "FindAuction.in", "url": "https://findauction.in"},
+            {"source": "findauction_prop", "label": "FindAuctionProperty", "url": "https://findauctionproperty.com"},
+            {"source": "auction_tiger", "label": "AuctionTiger", "url": "https://auctiontiger.net"},
+        ],
+        "banks": [
+            {"source": "sarfaesi", "label": "SBI SARFAESI", "url": "https://www.sbi.co.in"},
+            {"source": "sbi", "label": "SBI", "url": "https://www.sbi.co.in"},
+            {"source": "pnb", "label": "PNB", "url": "https://www.pnbindia.in"},
+            {"source": "bob", "label": "Bank of Baroda", "url": "https://www.bankofbaroda.in"},
+            {"source": "canara", "label": "Canara Bank", "url": "https://www.canarabank.com"},
+            {"source": "hdfc", "label": "HDFC Bank", "url": "https://www.hdfcbank.com"},
+            {"source": "icici", "label": "ICICI Bank", "url": "https://www.icicibank.com"},
+            {"source": "union", "label": "Union Bank", "url": "https://www.unionbankofindia.co.in"},
+            {"source": "yes_bank", "label": "Yes Bank", "url": "https://www.yesbank.in"},
+        ],
+    }
+
+    # Enrich with counts
+    for _category, sources in categories.items():
+        for source_info in sources:
+            source_info["count"] = source_counts.get(source_info["source"], 0)
+
+    return categories
+
+
+@router.get("/auctions/{auction_id}")
+async def get_auction(auction_id: int, db: AsyncSession = Depends(get_db)):
+    """Get a single auction by ID — checks bank auctions first, then court auctions."""
+    bank_result = await db.execute(
+        select(BankAuction).where(BankAuction.id == auction_id)
+    )
+    bank_row = bank_result.scalar_one_or_none()
+    if bank_row is not None:
+        return BankAuctionResponse.model_validate(bank_row)
+
+    court_result = await db.execute(
+        select(CourtAuction).where(CourtAuction.id == auction_id)
+    )
+    court_row = court_result.scalar_one_or_none()
+    if court_row is not None:
+        return CourtAuctionResponse.model_validate(court_row)
+
+    raise HTTPException(status_code=404, detail="Auction not found")
+
+
+@router.get("/auctions", response_model=AuctionListResponse)
+async def list_auctions(
+    type: str | None = Query(None, description="'bank' or 'court'"),
+    bank: str | None = Query(None),
+    city: str | None = Query(None, description="Filter by city (case-insensitive partial match)"),
+    source: str | None = Query(None, description="Filter by auction source enum value"),
+    property_type: str | None = Query(None),
+    min_price: float | None = Query(None),
+    max_price: float | None = Query(None),
+    date_from: date_type | None = Query(None),
+    date_to: date_type | None = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Paginated list of auctions. Defaults to bank auctions; set type='court' for court auctions.
+    """
+    offset = (page - 1) * limit
+
+    if type == "court":
+        filters = []
+        if city:
+            filters.append(CourtAuction.city.ilike(f"%{city}%"))
+        if property_type:
+            filters.append(CourtAuction.property_type.ilike(f"%{property_type}%"))
+        if min_price:
+            filters.append(CourtAuction.reserve_price >= min_price)
+        if max_price:
+            filters.append(CourtAuction.reserve_price <= max_price)
+        if date_from:
+            filters.append(CourtAuction.auction_date >= date_from)
+        if date_to:
+            filters.append(CourtAuction.auction_date <= date_to)
+
+        count_q = select(func.count()).select_from(CourtAuction)
+        data_q = select(CourtAuction)
+        if filters:
+            count_q = count_q.where(and_(*filters))
+            data_q = data_q.where(and_(*filters))
+
+        total = (await db.execute(count_q)).scalar_one()
+        rows = (await db.execute(data_q.offset(offset).limit(limit))).scalars().all()
+        # Map CourtAuction rows to BankAuctionResponse-compatible dicts
+        items = []
+        for r in rows:
+            items.append(
+                BankAuctionResponse(
+                    id=r.id,
+                    bank_name=r.court_name or "Court",
+                    property_description=r.property_description or "",
+                    full_address=r.locality,
+                    reserve_price=float(r.reserve_price) if r.reserve_price else None,
+                    emd_amount=None,
+                    auction_date=r.auction_date,
+                    emd_deadline=None,
+                    contact_info=r.contact_details,
+                    source=r.source,
+                    source_url=r.source_url,
+                    property_type=r.property_type,
+                    lat=None,
+                    lng=None,
+                    slug=getattr(r, "slug", None),
+                    last_scraped_at=None,
+                    created_at=r.created_at,
+                    updated_at=r.updated_at,
+                )
+            )
+        meta = await _meta_from_table(db, CourtAuction)
+        return {
+            "items": items,
+            "meta": meta,
+            **_paginate(total, page, limit),
+        }
+    else:
+        # Default: bank auctions
+        filters = []
+        if bank:
+            filters.append(BankAuction.bank_name.ilike(f"%{bank}%"))
+        if city:
+            filters.append(BankAuction.city.ilike(f"%{city}%"))
+        if source:
+            filters.append(BankAuction.source == source)
+        if property_type:
+            filters.append(BankAuction.property_type.ilike(f"%{property_type}%"))
+        if min_price:
+            filters.append(BankAuction.reserve_price >= min_price)
+        if max_price:
+            filters.append(BankAuction.reserve_price <= max_price)
+        if date_from:
+            filters.append(BankAuction.auction_date >= date_from)
+        if date_to:
+            filters.append(BankAuction.auction_date <= date_to)
+
+        count_q = select(func.count()).select_from(BankAuction)
+        data_q = select(BankAuction)
+        if filters:
+            count_q = count_q.where(and_(*filters))
+            data_q = data_q.where(and_(*filters))
+
+        total = (await db.execute(count_q)).scalar_one()
+        rows = (await db.execute(data_q.offset(offset).limit(limit))).scalars().all()
+        meta = await _meta_from_table(db, BankAuction)
+        return {
+            "items": rows,
+            "meta": meta,
+            **_paginate(total, page, limit),
+        }

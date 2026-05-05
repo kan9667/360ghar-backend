@@ -10,8 +10,10 @@ All servers share the same OAuth authentication infrastructure.
 
 from contextlib import asynccontextmanager
 
+import sentry_sdk
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from mcp.server.auth.middleware.auth_context import AuthContextMiddleware
 from mcp.server.auth.middleware.bearer_auth import BearerAuthBackend
 from starlette.middleware import Middleware
@@ -26,10 +28,10 @@ from app.core.config import settings
 from app.core.database import engine
 from app.core.exceptions import BaseAPIException
 from app.core.logging import get_logger
-from app.mcp.admin_server import admin_mcp
-from app.mcp.auth_provider import SupabaseTokenVerifier, configure_fastmcp_auth, get_public_base_url
+from app.mcp.admin import admin_mcp
+from app.mcp.auth_provider import SupabaseTokenVerifier, get_public_base_url
 from app.mcp.chatgpt import register_chatgpt_widgets
-from app.mcp.user_server import user_mcp
+from app.mcp.user import user_mcp
 from app.middleware.security import (
     RequestIDMiddleware,
     RequestLoggingMiddleware,
@@ -43,7 +45,6 @@ logger = get_logger(__name__)
 def create_app(testing: bool = False) -> FastAPI:
     """Create and configure FastAPI application."""
     logger.info("Creating FastAPI application", extra={"testing": testing})
-    configure_fastmcp_auth()
 
     # Register ChatGPT widgets for both user and admin MCP servers
     register_chatgpt_widgets(user_mcp)
@@ -380,6 +381,40 @@ def create_app(testing: bool = False) -> FastAPI:
             content={
                 "error": {
                     "code": error_code,
+                    "message": message,
+                }
+            },
+        )
+
+    @app.exception_handler(ValueError)
+    async def value_error_handler(request, exc: ValueError):
+        """Handle validation errors with standardized error format."""
+        logger.warning("Validation error: %s - %s %s", exc, request.method, request.url.path)
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": str(exc),
+                }
+            },
+        )
+
+    @app.exception_handler(Exception)
+    async def general_exception_handler(request, exc: Exception):
+        """Handle unexpected exceptions — hide details in production."""
+        logger.error(
+            "Unexpected error: %s - %s %s", exc, request.method, request.url.path, exc_info=True
+        )
+        sentry_sdk.capture_exception(exc)
+
+        message = "An unexpected error occurred" if settings.ENVIRONMENT == "production" else str(exc)
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "INTERNAL_ERROR",
                     "message": message,
                 }
             },

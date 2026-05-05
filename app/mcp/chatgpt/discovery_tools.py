@@ -32,7 +32,7 @@ from app.mcp.utils import (
 from app.schemas.property import UnifiedPropertyFilter, PropertySwipe
 
 # Import the user MCP server to register tools
-from app.mcp.user_server import user_mcp
+from app.mcp.user.server import user_mcp
 
 logger = get_logger(__name__)
 
@@ -212,7 +212,7 @@ async def discovery_search(
             )
 
     except Exception as e:
-        logger.error(f"Error in discovery_search: {e}", exc_info=True)
+        logger.error("Error in discovery_search: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error searching properties: {str(e)}",
@@ -271,7 +271,7 @@ async def discovery_property_get(
             )
 
     except Exception as e:
-        logger.error(f"Error in discovery.property.get: {e}", exc_info=True)
+        logger.error("Error in discovery.property.get: %s", e, exc_info=True)
         if "not found" in str(e).lower():
             return format_chatgpt_response(
                 data={"error": True, "code": "NOT_FOUND", "property_id": property_id},
@@ -359,7 +359,7 @@ async def discovery_feed(
             )
 
     except Exception as e:
-        logger.error(f"Error in discovery.feed: {e}", exc_info=True)
+        logger.error("Error in discovery.feed: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error loading the discovery feed: {str(e)}",
@@ -406,7 +406,7 @@ async def discovery_amenities() -> Dict[str, Any]:
             )
 
     except Exception as e:
-        logger.error(f"Error in discovery.amenities: {e}", exc_info=True)
+        logger.error("Error in discovery.amenities: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error loading amenities: {str(e)}",
@@ -485,7 +485,7 @@ async def discovery_swipe(
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in discovery.swipe: {e}", exc_info=True)
+        logger.error("Error in discovery.swipe: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error recording your swipe: {str(e)}",
@@ -573,7 +573,7 @@ async def discovery_shortlist(
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in discovery.shortlist: {e}", exc_info=True)
+        logger.error("Error in discovery.shortlist: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error loading your shortlist: {str(e)}",
@@ -654,7 +654,7 @@ async def discovery_recommendations(
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in discovery.recommendations: {e}", exc_info=True)
+        logger.error("Error in discovery.recommendations: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error generating recommendations: {str(e)}",

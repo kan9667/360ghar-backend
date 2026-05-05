@@ -36,7 +36,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.mcp.chatgpt import get_widget_name_for_tool
 from app.services.ai_agent.system_prompt import get_system_prompt
-from app.services.ai_agent.tool_bridge import AgentDeps, get_tools_for_role
+from app.services.ai_agent.tools import AgentDeps, get_tools_for_role
 
 logger = get_logger(__name__)
 

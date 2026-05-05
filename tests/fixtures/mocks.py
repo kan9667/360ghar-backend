@@ -44,9 +44,11 @@ def mock_fcm_send():
 
     Captures FCM messages for assertion.
     """
-    with patch("app.services.notifications.send_message", new_callable=AsyncMock) as mock:
+    with patch("app.services.notifications.fcm.send_message", new_callable=AsyncMock) as mock:
         mock.return_value = {"success": True, "name": "projects/test/messages/12345"}
-        yield mock
+        # Also patch the re-export in __init__.py so direct package-level imports see the mock
+        with patch("app.services.notifications.send_message", new=mock):
+            yield mock
 
 
 # =============================================================================
@@ -62,7 +64,7 @@ def mock_firebase_fcm():
     - Access token retrieval
     - FCM send endpoint
     """
-    with patch("app.services.notifications._access_token") as mock_token:
+    with patch("app.services.notifications.fcm._access_token") as mock_token:
         mock_token.return_value = "mock_fcm_access_token"
 
         with respx.mock:
@@ -82,7 +84,7 @@ def mock_firebase_fcm():
 @pytest.fixture
 def mock_fcm_failure():
     """Mock FCM to simulate send failures."""
-    with patch("app.services.notifications._access_token") as mock_token:
+    with patch("app.services.notifications.fcm._access_token") as mock_token:
         mock_token.return_value = "mock_fcm_access_token"
 
         with respx.mock:

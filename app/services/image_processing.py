@@ -71,7 +71,7 @@ def generate_thumbnail(
             return output.getvalue()
 
     except Exception as e:
-        logger.error(f"Thumbnail generation failed: {str(e)}")
+        logger.error("Thumbnail generation failed: %s", e)
         raise
 
 
@@ -118,7 +118,7 @@ def convert_to_webp(
             return output.getvalue()
 
     except Exception as e:
-        logger.error(f"WebP conversion failed: {str(e)}")
+        logger.error("WebP conversion failed: %s", e)
         raise
 
 
@@ -183,7 +183,7 @@ def extract_exif(image_bytes: bytes) -> Dict[str, Any]:
             return exif_data
 
     except Exception as e:
-        logger.warning(f"EXIF extraction failed (non-critical): {str(e)}")
+        logger.warning("EXIF extraction failed (non-critical): %s", e)
         return exif_data
 
 
@@ -220,7 +220,7 @@ def _parse_gps_info(gps_info: Dict) -> Dict[str, Any]:
             gps_data["altitude"] = alt
 
     except Exception as e:
-        logger.warning(f"GPS parsing failed (non-critical): {str(e)}")
+        logger.warning("GPS parsing failed (non-critical): %s", e)
 
     return gps_data
 
@@ -248,7 +248,7 @@ def get_image_dimensions(image_bytes: bytes) -> Tuple[int, int]:
         with Image.open(io.BytesIO(image_bytes)) as img:
             return img.size
     except Exception as e:
-        logger.error(f"Failed to get image dimensions: {str(e)}")
+        logger.error("Failed to get image dimensions: %s", e)
         raise
 
 
@@ -275,15 +275,12 @@ def validate_360_panorama(image_bytes: bytes, tolerance: float = 0.1) -> bool:
         is_valid = abs(actual_ratio - expected_ratio) <= tolerance
 
         if not is_valid:
-            logger.warning(
-                f"Image aspect ratio {actual_ratio:.2f} deviates from expected 2:1 ratio. "
-                f"May not be a valid 360 panorama."
-            )
+            logger.warning("Image aspect ratio %f deviates from expected 2:1 ratio. May not be a valid 360 panorama.", actual_ratio)
 
         return is_valid
 
     except Exception as e:
-        logger.error(f"360 panorama validation failed: {str(e)}")
+        logger.error("360 panorama validation failed: %s", e)
         return False
 
 
@@ -312,7 +309,7 @@ def get_image_info(image_bytes: bytes) -> Dict[str, Any]:
                 "file_size": len(image_bytes),
             }
     except Exception as e:
-        logger.error(f"Failed to get image info: {str(e)}")
+        logger.error("Failed to get image info: %s", e)
         raise
 
 
@@ -343,5 +340,5 @@ async def process_scene_image(image_bytes: bytes) -> Dict[str, bytes]:
         }
 
     except Exception as e:
-        logger.error(f"Scene image processing failed: {str(e)}")
+        logger.error("Scene image processing failed: %s", e)
         raise

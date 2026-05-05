@@ -98,7 +98,7 @@ def invalid_input_response(
 
 def not_found_response(
     resource: str,
-    resource_id: Optional[Any] = None
+    resource_id: str | int | None = None
 ) -> Dict[str, Any]:
     """Helper to create not found response."""
     message = f"{resource} not found"

@@ -5,12 +5,45 @@ This module provides a unified interface for different AI providers (Gemini, GLM
 enabling easy switching between providers and reuse across different AI-powered features.
 """
 
+from __future__ import annotations
+
 import json
+import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field
 from enum import Enum
+from typing import Any
+
+import httpx
+from pydantic import BaseModel, Field
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
+
+logger = logging.getLogger(__name__)
+
+# Retry configuration for AI provider HTTP requests
+AI_MAX_RETRIES = 3
+AI_RETRY_MIN_WAIT = 2  # seconds
+AI_RETRY_MAX_WAIT = 8  # seconds
+
+# HTTP status codes that are transient and worth retrying
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+def _is_retryable_error(exc: BaseException) -> bool:
+    """Determine if an exception is transient and worth retrying."""
+    # All httpx network-level errors (TimeoutException, ConnectError,
+    # SendError, ReceiveError, PoolTimeout, etc.) are transient
+    if isinstance(exc, httpx.RequestError):
+        return True
+    if isinstance(exc, AIProviderError) and exc.status_code in _RETRYABLE_STATUS_CODES:
+        return True
+    return False
 
 
 class AIRole(str, Enum):
@@ -55,8 +88,99 @@ class AIProvider(ABC):
 
     def __init__(self, config: AIProviderConfig):
         self.config = config
+        self._http_client: httpx.AsyncClient | None = None
 
-    def _extract_balanced_json_object(self, text: str) -> Optional[str]:
+    def _get_http_client(self) -> httpx.AsyncClient:
+        """Get or create the reusable HTTP client."""
+        if self._http_client is None or self._http_client.is_closed:
+            self._http_client = httpx.AsyncClient(
+                timeout=self.config.timeout,
+                follow_redirects=True,
+                limits=httpx.Limits(
+                    max_connections=10,
+                    max_keepalive_connections=5,
+                    keepalive_expiry=60,
+                ),
+            )
+        return self._http_client
+
+    async def close(self) -> None:
+        """Close the HTTP client."""
+        if self._http_client and not self._http_client.is_closed:
+            await self._http_client.aclose()
+            self._http_client = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close()
+
+    async def _make_request(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+    ) -> httpx.Response:
+        """
+        Execute an HTTP POST with automatic retries for transient errors.
+
+        Uses tenacity with exponential backoff. Retries on:
+        - Network errors (timeout, connect, send, receive)
+        - HTTP 429 (rate limit), 500, 502, 503, 504
+
+        Does NOT retry on auth errors (401, 403) or client errors (400).
+
+        All exceptions are normalised to ``AIProviderError`` before
+        propagating so callers only need to handle that single type.
+        """
+        @retry(
+            stop=stop_after_attempt(AI_MAX_RETRIES),
+            wait=wait_exponential(
+                multiplier=1,
+                min=AI_RETRY_MIN_WAIT,
+                max=AI_RETRY_MAX_WAIT,
+            ),
+            retry=retry_if_exception(_is_retryable_error),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+            reraise=True,
+        )
+        async def _do_post() -> httpx.Response:
+            response = await client.post(url, headers=headers, json=payload)
+
+            if response.status_code in _RETRYABLE_STATUS_CODES:
+                raise AIProviderError(
+                    message=f"Retryable HTTP {response.status_code}: {response.text[:500]}",
+                    provider=self.name,
+                    status_code=response.status_code,
+                    response_body=response.text[:1000],
+                )
+
+            if response.status_code >= 400:
+                raise AIProviderError(
+                    message=f"API request failed: {response.text[:500]}",
+                    provider=self.name,
+                    status_code=response.status_code,
+                    response_body=response.text[:1000],
+                )
+
+            return response
+
+        try:
+            return await _do_post()
+        except httpx.TimeoutException as exc:
+            raise AIProviderError(
+                message=f"Request timed out after {AI_MAX_RETRIES} attempts: {exc}",
+                provider=self.name,
+            ) from exc
+        except httpx.RequestError as exc:
+            raise AIProviderError(
+                message=f"Request failed after {AI_MAX_RETRIES} attempts: {exc}",
+                provider=self.name,
+            ) from exc
+
+    def _extract_balanced_json_object(self, text: str) -> str | None:
         """Return the first balanced JSON object embedded in text."""
         start = text.find("{")
         while start != -1:
@@ -89,7 +213,7 @@ class AIProvider(ABC):
 
         return None
 
-    def _parse_json_response(self, text: str) -> Dict[str, Any]:
+    def _parse_json_response(self, text: str) -> dict[str, Any]:
         """Parse JSON from AI response text.
 
         Tries, in order:
@@ -145,8 +269,8 @@ class AIProvider(ABC):
     @abstractmethod
     async def complete(
         self,
-        messages: List[AIMessage],
-        vision_input: Optional[VisionInput] = None,
+        messages: list[AIMessage],
+        vision_input: VisionInput | None = None,
     ) -> str:
         """
         Generate a text completion from the AI model.
@@ -166,10 +290,10 @@ class AIProvider(ABC):
     @abstractmethod
     async def complete_json(
         self,
-        messages: List[AIMessage],
-        vision_input: Optional[VisionInput] = None,
-        json_schema: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        messages: list[AIMessage],
+        vision_input: VisionInput | None = None,
+        json_schema: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Generate a structured JSON completion from the AI model.
 
@@ -194,8 +318,8 @@ class AIProviderError(Exception):
         self,
         message: str,
         provider: str,
-        status_code: Optional[int] = None,
-        response_body: Optional[str] = None,
+        status_code: int | None = None,
+        response_body: str | None = None,
     ):
         super().__init__(message)
         self.provider = provider

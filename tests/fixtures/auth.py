@@ -7,16 +7,14 @@ and generating mock JWT tokens for authenticated requests.
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import jwt
 import pytest
 import pytest_asyncio
-from jose import jwt
 
-from app.models.users import User
 from app.models.enums import UserRole
-
+from app.models.users import User
 
 # =============================================================================
 # JWT Token Creation
@@ -62,7 +60,7 @@ def create_test_jwt(
     return jwt.encode(payload, TEST_JWT_SECRET, algorithm="HS256")
 
 
-def decode_test_jwt(token: str) -> Optional[Dict]:
+def decode_test_jwt(token: str) -> dict | None:
     """
     Decode a test JWT token.
 
@@ -187,7 +185,7 @@ async def test_admin_user(db_session) -> User:
 # =============================================================================
 
 @pytest.fixture
-def user_auth_headers(test_user) -> Dict[str, str]:
+def user_auth_headers(test_user) -> dict[str, str]:
     """
     Generate authorization headers for test_user.
 
@@ -203,13 +201,13 @@ def user_auth_headers(test_user) -> Dict[str, str]:
 
 
 @pytest.fixture
-def auth_headers(user_auth_headers) -> Dict[str, str]:
+def auth_headers(user_auth_headers) -> dict[str, str]:
     """Alias for user_auth_headers."""
     return user_auth_headers
 
 
 @pytest.fixture
-def agent_auth_headers(test_agent_user) -> Dict[str, str]:
+def agent_auth_headers(test_agent_user) -> dict[str, str]:
     """
     Generate authorization headers for test_agent_user.
 
@@ -225,7 +223,7 @@ def agent_auth_headers(test_agent_user) -> Dict[str, str]:
 
 
 @pytest.fixture
-def admin_auth_headers(test_admin_user) -> Dict[str, str]:
+def admin_auth_headers(test_admin_user) -> dict[str, str]:
     """
     Generate authorization headers for test_admin_user.
 
@@ -361,13 +359,14 @@ async def authenticated_client(test_app, test_user):
 
     Overrides auth dependencies to return the test_user.
     """
+    from httpx import ASGITransport, AsyncClient
+
     from app.api.api_v1.dependencies.auth import (
-        get_current_user,
         get_current_active_user,
+        get_current_user,
         get_current_user_optional,
     )
     from app.schemas.user import User as UserSchema
-    from httpx import ASGITransport, AsyncClient
 
     # Create schema from test user
     user_schema = UserSchema.model_validate(test_user, from_attributes=True)
@@ -401,14 +400,15 @@ async def admin_authenticated_client(test_app, test_admin_user):
 
     Overrides auth dependencies to return the test_admin_user.
     """
+    from httpx import ASGITransport, AsyncClient
+
     from app.api.api_v1.dependencies.auth import (
-        get_current_user,
         get_current_active_user,
-        get_current_user_optional,
         get_current_admin,
+        get_current_user,
+        get_current_user_optional,
     )
     from app.schemas.user import User as UserSchema
-    from httpx import ASGITransport, AsyncClient
 
     # Create schema from test admin user
     user_schema = UserSchema.model_validate(test_admin_user, from_attributes=True)
@@ -446,14 +446,15 @@ async def agent_authenticated_client(test_app, test_agent_user):
 
     Overrides auth dependencies to return the test_agent_user.
     """
+    from httpx import ASGITransport, AsyncClient
+
     from app.api.api_v1.dependencies.auth import (
-        get_current_user,
         get_current_active_user,
-        get_current_user_optional,
         get_current_agent,
+        get_current_user,
+        get_current_user_optional,
     )
     from app.schemas.user import User as UserSchema
-    from httpx import ASGITransport, AsyncClient
 
     # Create schema from test agent user
     user_schema = UserSchema.model_validate(test_agent_user, from_attributes=True)

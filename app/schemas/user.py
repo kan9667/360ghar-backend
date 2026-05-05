@@ -1,8 +1,11 @@
-from pydantic import BaseModel, EmailStr, field_validator, ConfigDict
-from typing import Optional, Dict, Any, List
 from datetime import date, datetime
-from app.models.enums import PropertyPurpose, PropertyType
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
+
+from app.models.enums import PropertyPurpose, PropertyType, UserRole
 from app.utils.validators import ValidationUtils
+
 
 class UserBase(BaseModel):
     email: Optional[EmailStr] = None
@@ -92,7 +95,7 @@ class UserLogin(BaseModel):
 class UserInDB(UserBase):
     id: int
     supabase_user_id: str  # UUID from Supabase Auth
-    role: str = 'user'
+    role: UserRole = UserRole.user
     is_active: bool
     is_verified: bool
     profile_image_url: Optional[str] = None

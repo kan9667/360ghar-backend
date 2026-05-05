@@ -1,31 +1,106 @@
 # Models package
 # Import all models for easy access
 
-from .users import User, UserSearchHistory, UserSwipe
 from .agents import Agent, AgentInteraction
-from .bookings import Booking
-from .core import BugReport, Page, AppVersion, FAQ
-from .properties import Property, PropertyImage, Amenity, PropertyAmenity, Visit
-from .blogs import BlogCategory, BlogTag, BlogPost, BlogPostCategory, BlogPostTag
-from .pm_documents import Document
-from .pm_tenants import RentalApplicationForm, RentalApplication
-from .pm_leases import Lease
-from .pm_finance import RentCharge, RentPayment, Expense
-from .pm_maintenance import MaintenanceRequest
-from .pm_inspections import InspectionChecklist
-from .tours import (
-    Tour, Scene, Hotspot, TourAnalyticsEvent,
-    AIJob, MediaFile, UserSession, TourLocation,
-    SearchIndex, CacheEntry, FloorPlan, TourBranding,
-    CustomDomain, VideoMetadata,
-)
 from .ai_conversations import AIConversation, AIConversationMessage
+from .blogs import BlogCategory, BlogPost, BlogPostCategory, BlogPostTag, BlogTag
+from .bookings import Booking
+from .core import FAQ, AppVersion, BugReport, Page
 from .data_hub import (
-    CircleRate, ReraProject, BankAuction, AuctionAlert, BankRate,
-    JamabandiCache, ZoningData, ColonyApproval, GazetteNotification,
-    ReraComplaint, CourtAuction, NeighbourhoodScore, ScraperRun,
+    AuctionAlert,
+    BankAuction,
+    BankRate,
+    CircleRate,
+    ColonyApproval,
+    CourtAuction,
+    GazetteNotification,
+    JamabandiCache,
+    NeighbourhoodScore,
+    ReraComplaint,
+    ReraProject,
+    ScraperRun,
+    ZoningData,
 )
-from .enums import *
+from .enums import (
+    PG_FLATMATE_TYPES,
+    AuctionSource,
+    BookingStatus,
+    BugSeverity,
+    BugStatus,
+    BugType,
+    ComplaintNature,
+    ConversationSource,
+    ConversationStatus,
+    DocumentType,
+    ExpenseCategory,
+    ExperienceLevel,
+    FlatmatesMode,
+    FlatmatesProfileStatus,
+    GazetteType,
+    HotspotType,
+    ImageCategory,
+    InspectionType,
+    LeaseStatus,
+    ListingGenderPreference,
+    ListingSharingType,
+    MaintenanceCategory,
+    MaintenanceRequestStatus,
+    MaintenanceUrgency,
+    ManagedPropertyStatus,
+    MessageType,
+    PageFormat,
+    PaymentStatus,
+    PropertyPurpose,
+    PropertyStatus,
+    PropertyType,
+    RentChargeStatus,
+    ScraperStatus,
+    SwipeAction,
+    SwipeTargetType,
+    TenantStatus,
+    TourStatus,
+    TourVisibility,
+    UserMatchStatus,
+    UserReportReason,
+    UserReportStatus,
+    UserRole,
+    VisitContext,
+    VisitStatus,
+    WorkOrderStatus,
+)
+from .pm_documents import Document
+from .pm_finance import Expense, RentCharge, RentPayment
+from .pm_inspections import InspectionChecklist
+from .pm_leases import Lease
+from .pm_maintenance import MaintenanceRequest
+from .pm_tenants import RentalApplication, RentalApplicationForm
+from .properties import Amenity, Property, PropertyAmenity, PropertyImage, Visit
+from .social import (
+    AppCatalog,
+    MatchQnAAnswer,
+    UserBlock,
+    UserConversation,
+    UserMatch,
+    UserMessage,
+    UserReport,
+)
+from .tours import (
+    AIJob,
+    CacheEntry,
+    CustomDomain,
+    FloorPlan,
+    Hotspot,
+    MediaFile,
+    Scene,
+    SearchIndex,
+    Tour,
+    TourAnalyticsEvent,
+    TourBranding,
+    TourLocation,
+    UserSession,
+    VideoMetadata,
+)
+from .users import User, UserSearchHistory, UserSwipe
 
 __all__ = [
     # Users
@@ -91,6 +166,15 @@ __all__ = [
     "AIConversation",
     "AIConversationMessage",
 
+    # Shared social primitives
+    "UserMatch",
+    "UserConversation",
+    "UserMessage",
+    "UserBlock",
+    "UserReport",
+    "AppCatalog",
+    "MatchQnAAnswer",
+
     # Data Hub
     "CircleRate",
     "ReraProject",
@@ -105,4 +189,51 @@ __all__ = [
     "CourtAuction",
     "NeighbourhoodScore",
     "ScraperRun",
+
+    # Enums
+    "AuctionSource",
+    "BookingStatus",
+    "BugSeverity",
+    "BugStatus",
+    "BugType",
+    "ComplaintNature",
+    "ConversationSource",
+    "ConversationStatus",
+    "DocumentType",
+    "ExpenseCategory",
+    "ExperienceLevel",
+    "FlatmatesMode",
+    "FlatmatesProfileStatus",
+    "GazetteType",
+    "HotspotType",
+    "ImageCategory",
+    "InspectionType",
+    "LeaseStatus",
+    "ListingGenderPreference",
+    "ListingSharingType",
+    "MaintenanceCategory",
+    "MaintenanceRequestStatus",
+    "MaintenanceUrgency",
+    "ManagedPropertyStatus",
+    "MessageType",
+    "PageFormat",
+    "PaymentStatus",
+    "PG_FLATMATE_TYPES",
+    "PropertyPurpose",
+    "PropertyStatus",
+    "PropertyType",
+    "RentChargeStatus",
+    "ScraperStatus",
+    "SwipeAction",
+    "SwipeTargetType",
+    "TenantStatus",
+    "TourStatus",
+    "TourVisibility",
+    "UserMatchStatus",
+    "UserReportReason",
+    "UserReportStatus",
+    "UserRole",
+    "VisitContext",
+    "VisitStatus",
+    "WorkOrderStatus",
 ]

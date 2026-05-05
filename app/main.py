@@ -1,20 +1,19 @@
 import logging
-import yaml
 
-from dotenv import load_dotenv
-from fastapi import Request, HTTPException, status
-from fastapi.responses import JSONResponse, Response
-from sqlalchemy import text
-
-from app.factory import create_app
-from app.core.config import settings
-from app.core.logging import get_logger, setup_logging
-from app.core.utils import utc_now_iso
 import sentry_sdk
 import sentry_sdk.integrations.fastapi
 import sentry_sdk.integrations.sqlalchemy
+import yaml
+from dotenv import load_dotenv
+from fastapi import HTTPException
+from fastapi.responses import Response
 from sentry_sdk.integrations.logging import LoggingIntegration
+from sqlalchemy import text
 
+from app.core.config import settings
+from app.core.logging import get_logger, setup_logging
+from app.core.utils import utc_now_iso
+from app.factory import create_app
 
 load_dotenv()
 
@@ -80,7 +79,7 @@ async def health_check():
     """Health check endpoint with database connectivity"""
     try:
         from app.core.database import AsyncSessionLocal
-        
+
         # Test database connection
         db_status = "unknown"
         try:
@@ -88,9 +87,9 @@ async def health_check():
                 await session.execute(text("SELECT 1"))
             db_status = "connected"
         except Exception as db_e:
-            logger.error(f"Database health check failed: {db_e}")
+            logger.error("Database health check failed: %s", db_e)
             db_status = "disconnected"
-        
+
         overall_status = "healthy" if db_status == "connected" else "degraded"
 
         return {
@@ -111,8 +110,8 @@ async def health_check():
             "version": settings.APP_VERSION,
         }
     except Exception as e:
-        logger.error(f"Health check failed: {str(e)}")
-        raise HTTPException(status_code=503, detail="Service unavailable")
+        logger.error("Health check failed: %s", e)
+        raise HTTPException(status_code=503, detail="Service unavailable") from e
 
 
 @app.get("/config")
@@ -146,51 +145,6 @@ async def get_openapi_yaml():
         headers={
             "Content-Disposition": "attachment; filename=360ghar-openapi-spec.yaml"
         },
-    )
-
-
-@app.exception_handler(ValueError)
-async def value_error_handler(request: Request, exc: ValueError):
-    """Handle validation errors"""
-    logger.warning(f"Validation error: {exc} - {request.method} {request.url.path}")
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={
-            "detail": str(exc),
-            "error": {
-                "message": str(exc),
-                "type": "ValidationError",
-                "path": str(request.url),
-                "method": request.method,
-                "timestamp": utc_now_iso()
-            }
-        }
-    )
-
-@app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    """Handle unexpected exceptions"""
-    logger.error(f"Unexpected error: {str(exc)} - {request.method} {request.url.path}", exc_info=True)
-    sentry_sdk.capture_exception(exc)
-
-    # Don't expose internal errors in production
-    if settings.ENVIRONMENT == "production":
-        message = "An unexpected error occurred"
-    else:
-        message = str(exc)
-    
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "detail": message,
-            "error": {
-                "message": message,
-                "type": "InternalServerError",
-                "path": str(request.url),
-                "method": request.method,
-                "timestamp": utc_now_iso()
-            }
-        }
     )
 
 

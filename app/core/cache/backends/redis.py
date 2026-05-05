@@ -59,7 +59,7 @@ class RedisCacheBackend:
             await self._client.ping()
             logger.info("Redis cache connected successfully")
         except Exception as e:
-            logger.error(f"Failed to connect to Redis: {e}")
+            logger.error("Failed to connect to Redis: %s", e)
             self._client = None
 
     async def disconnect(self) -> None:
@@ -105,7 +105,7 @@ class RedisCacheBackend:
             self.stats.hits += 1
             return self._deserialize(data)
         except Exception as e:
-            logger.error(f"Redis get error for {key}: {e}")
+            logger.error("Redis get error for %s: %s", key, e)
             self.stats.errors += 1
             return None
 
@@ -121,9 +121,46 @@ class RedisCacheBackend:
             self.stats.sets += 1
             return True
         except Exception as e:
-            logger.error(f"Redis set error for {key}: {e}")
+            logger.error("Redis set error for %s: %s", key, e)
             self.stats.errors += 1
             return False
+
+    async def get_and_delete(self, key: str) -> Optional[Any]:
+        """Atomically retrieve value and delete key from Redis.
+
+        Uses GETDEL (Redis 6.2+) when available, otherwise falls back to
+        a Lua script for atomicity.
+        """
+        if not self._client:
+            return None
+
+        try:
+            full_key = self._make_key(key)
+            # Try GETDEL first (Redis 6.2+)
+            try:
+                data = await self._client.getdel(full_key)  # type: ignore[attr-defined]
+            except (AttributeError, Exception):
+                # Fallback: Lua script for atomic get-and-delete
+                lua_script = """
+                local value = redis.call('GET', KEYS[1])
+                if value then
+                    redis.call('DEL', KEYS[1])
+                end
+                return value
+                """
+                data = await self._client.eval(lua_script, 1, full_key)
+
+            if data is None:
+                self.stats.misses += 1
+                return None
+
+            self.stats.hits += 1
+            self.stats.deletes += 1
+            return self._deserialize(data)
+        except Exception as e:
+            logger.error("Redis get_and_delete error for %s: %s", key, e)
+            self.stats.errors += 1
+            return None
 
     async def delete(self, key: str) -> bool:
         """Delete single key from Redis."""
@@ -136,7 +173,7 @@ class RedisCacheBackend:
                 self.stats.deletes += 1
             return bool(result)
         except Exception as e:
-            logger.error(f"Redis delete error for {key}: {e}")
+            logger.error("Redis delete error for %s: %s", key, e)
             self.stats.errors += 1
             return False
 
@@ -154,12 +191,12 @@ class RedisCacheBackend:
                     await self._client.delete(key)
                     deleted += 1
                 except Exception as inner_e:
-                    logger.error(f"Failed deleting key {key}: {inner_e}")
+                    logger.error("Failed deleting key %s: %s", key, inner_e)
 
             self.stats.deletes += deleted
             return deleted
         except Exception as e:
-            logger.error(f"Redis delete_pattern error for {pattern}: {e}")
+            logger.error("Redis delete_pattern error for %s: %s", pattern, e)
             self.stats.errors += 1
             return deleted
 
@@ -171,7 +208,7 @@ class RedisCacheBackend:
         try:
             return bool(await self._client.exists(self._make_key(key)))
         except Exception as e:
-            logger.error(f"Redis exists error for {key}: {e}")
+            logger.error("Redis exists error for %s: %s", key, e)
             return False
 
     async def clear(self) -> bool:
@@ -181,10 +218,10 @@ class RedisCacheBackend:
 
         try:
             deleted = await self.delete_pattern("*")
-            logger.info(f"Redis cache cleared: {deleted} keys")
+            logger.info("Redis cache cleared: %s keys", deleted)
             return True
         except Exception as e:
-            logger.error(f"Redis clear error: {e}")
+            logger.error("Redis clear error: %s", e)
             return False
 
     def get_stats(self) -> dict:

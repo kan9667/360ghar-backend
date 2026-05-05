@@ -15,12 +15,23 @@ from app.core.exceptions import (
     BadRequestException,
     RateLimitException,
     ServiceUnavailableException,
+    ExternalServiceError,
+    StorageException,
     FileTooLargeException,
+    InvalidFileException,
     PropertyNotFoundException,
     UserNotFoundException,
     AgentNotFoundException,
     BookingNotFoundException,
     VisitNotFoundException,
+    TourNotFoundException,
+    SceneNotFoundException,
+    HotspotNotFoundException,
+    BlogNotFoundException,
+    CategoryNotFoundException,
+    TagNotFoundException,
+    LeaseNotFoundException,
+    MaintenanceRequestNotFoundException,
     InsufficientPermissionsError,
     PropertyOwnershipError,
     BookingConflictError,
@@ -197,6 +208,88 @@ class TestPayloadExceptions:
         assert exc.status_code == status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
         assert exc.detail == "File too large"
 
+    def test_invalid_file_exception(self):
+        """Test InvalidFileException inherits BadRequestException."""
+        exc = InvalidFileException()
+        assert exc.status_code == status.HTTP_400_BAD_REQUEST
+        assert exc.detail == "Invalid file"
+        assert exc.error_code == "INVALID_FILE"
+        assert isinstance(exc, BadRequestException)
+
+
+class TestExternalAndStorageExceptions:
+    """Tests for external service and storage exceptions."""
+
+    def test_external_service_error(self):
+        """Test ExternalServiceError defaults."""
+        exc = ExternalServiceError()
+        assert exc.status_code == status.HTTP_502_BAD_GATEWAY
+        assert exc.detail == "External service error"
+        assert exc.error_code == "EXTERNAL_SERVICE_ERROR"
+
+    def test_storage_exception(self):
+        """Test StorageException defaults."""
+        exc = StorageException()
+        assert exc.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert exc.detail == "Storage operation failed"
+        assert exc.error_code == "STORAGE_ERROR"
+
+
+class TestTourExceptions:
+    """Tests for tour-related exceptions."""
+
+    def test_tour_not_found(self):
+        """Test TourNotFoundException."""
+        exc = TourNotFoundException()
+        assert exc.status_code == status.HTTP_404_NOT_FOUND
+        assert exc.detail == "Tour not found"
+        assert exc.error_code == "TOUR_NOT_FOUND"
+
+    def test_scene_not_found(self):
+        """Test SceneNotFoundException."""
+        exc = SceneNotFoundException()
+        assert exc.detail == "Scene not found"
+        assert exc.error_code == "SCENE_NOT_FOUND"
+
+    def test_hotspot_not_found(self):
+        """Test HotspotNotFoundException."""
+        exc = HotspotNotFoundException()
+        assert exc.detail == "Hotspot not found"
+        assert exc.error_code == "HOTSPOT_NOT_FOUND"
+
+
+class TestBlogExceptions:
+    """Tests for blog-related exceptions."""
+
+    def test_blog_not_found(self):
+        exc = BlogNotFoundException()
+        assert exc.detail == "Blog post not found"
+        assert exc.error_code == "BLOG_NOT_FOUND"
+
+    def test_category_not_found(self):
+        exc = CategoryNotFoundException()
+        assert exc.detail == "Category not found"
+        assert exc.error_code == "CATEGORY_NOT_FOUND"
+
+    def test_tag_not_found(self):
+        exc = TagNotFoundException()
+        assert exc.detail == "Tag not found"
+        assert exc.error_code == "TAG_NOT_FOUND"
+
+
+class TestPMExceptions:
+    """Tests for property management exceptions."""
+
+    def test_lease_not_found(self):
+        exc = LeaseNotFoundException()
+        assert exc.detail == "Lease not found"
+        assert exc.error_code == "LEASE_NOT_FOUND"
+
+    def test_maintenance_request_not_found(self):
+        exc = MaintenanceRequestNotFoundException()
+        assert exc.detail == "Maintenance request not found"
+        assert exc.error_code == "MAINTENANCE_REQUEST_NOT_FOUND"
+
 
 class TestExceptionInheritance:
     """Tests for exception class hierarchy."""
@@ -209,10 +302,21 @@ class TestExceptionInheritance:
             AgentNotFoundException,
             BookingNotFoundException,
             VisitNotFoundException,
+            TourNotFoundException,
+            SceneNotFoundException,
+            HotspotNotFoundException,
+            BlogNotFoundException,
+            CategoryNotFoundException,
+            TagNotFoundException,
+            LeaseNotFoundException,
+            MaintenanceRequestNotFoundException,
             InsufficientPermissionsError,
             PropertyOwnershipError,
             BookingConflictError,
             DuplicateSwipeError,
+            ExternalServiceError,
+            StorageException,
+            InvalidFileException,
         ]
 
         for exc_class in domain_exceptions:

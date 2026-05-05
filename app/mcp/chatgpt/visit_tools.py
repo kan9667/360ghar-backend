@@ -26,7 +26,7 @@ from app.mcp.utils import get_user_from_mcp_context
 from app.schemas.visit import VisitCreate
 
 # Import the user MCP server to register tools
-from app.mcp.user_server import user_mcp
+from app.mcp.user.server import user_mcp
 
 logger = get_logger(__name__)
 
@@ -172,7 +172,7 @@ async def visits_schedule(
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in visits.schedule: {e}", exc_info=True)
+        logger.error("Error in visits.schedule: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error scheduling the visit: {str(e)}",
@@ -265,7 +265,7 @@ async def visits_list(
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in visits.list: {e}", exc_info=True)
+        logger.error("Error in visits.list: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error loading your visits: {str(e)}",
@@ -340,7 +340,7 @@ async def visits_get(
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in visits.get: {e}", exc_info=True)
+        logger.error("Error in visits.get: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error loading the visit: {str(e)}",
@@ -431,7 +431,7 @@ async def visits_cancel(
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in visits.cancel: {e}", exc_info=True)
+        logger.error("Error in visits.cancel: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error cancelling the visit: {str(e)}",

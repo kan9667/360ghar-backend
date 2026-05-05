@@ -24,7 +24,7 @@ from app.mcp.chatgpt.response_formatter import (
 from app.mcp.utils import get_user_from_mcp_context
 
 # Import the user MCP server to register tools
-from app.mcp.user_server import user_mcp
+from app.mcp.user.server import user_mcp
 
 logger = get_logger(__name__)
 
@@ -257,7 +257,7 @@ async def owner_leases_list(
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in owner.leases.list: {e}", exc_info=True)
+        logger.error("Error in owner.leases.list: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error loading your leases: {str(e)}",
@@ -328,7 +328,7 @@ async def owner_leases_get(
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in owner.leases.get: {e}", exc_info=True)
+        logger.error("Error in owner.leases.get: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error loading the lease: {str(e)}",
@@ -426,7 +426,7 @@ async def owner_leases_terminate(
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in owner.leases.terminate: {e}", exc_info=True)
+        logger.error("Error in owner.leases.terminate: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error terminating the lease: {str(e)}",
@@ -530,7 +530,7 @@ async def owner_rent_status(
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in owner.rent.status: {e}", exc_info=True)
+        logger.error("Error in owner.rent.status: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error loading rent status: {str(e)}",
@@ -644,7 +644,7 @@ async def owner_rent_record_payment(
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in owner.rent.record_payment: {e}", exc_info=True)
+        logger.error("Error in owner.rent.record_payment: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error recording the payment: {str(e)}",
@@ -730,7 +730,7 @@ async def owner_rent_history(
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in owner.rent.history: {e}", exc_info=True)
+        logger.error("Error in owner.rent.history: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error loading payment history: {str(e)}",
@@ -804,7 +804,7 @@ async def owner_dashboard_overview() -> Dict[str, Any]:
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in owner.dashboard.overview: {e}", exc_info=True)
+        logger.error("Error in owner.dashboard.overview: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error loading your dashboard: {str(e)}",
@@ -949,7 +949,7 @@ async def owner_maintenance_list(
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in owner.maintenance.list: {e}", exc_info=True)
+        logger.error("Error in owner.maintenance.list: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error loading maintenance requests: {str(e)}",
@@ -1099,7 +1099,7 @@ async def owner_maintenance_update(
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in owner.maintenance.update: {e}", exc_info=True)
+        logger.error("Error in owner.maintenance.update: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error updating the maintenance request: {str(e)}",
@@ -1203,7 +1203,7 @@ async def tenant_rent_dues() -> Dict[str, Any]:
     except AuthRequiredError:
         raise
     except Exception as e:
-        logger.error(f"Error in tenant.rent.dues: {e}", exc_info=True)
+        logger.error("Error in tenant.rent.dues: %s", e, exc_info=True)
         return format_chatgpt_response(
             data={"error": True, "message": str(e)},
             content_summary=f"Sorry, there was an error loading your rent dues: {str(e)}",

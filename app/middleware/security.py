@@ -1,25 +1,52 @@
-from typing import Optional, List
-from fastapi import Request, HTTPException, status
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.types import ASGIApp, Receive, Scope, Send
+from __future__ import annotations
+
+import contextvars
 import hashlib
 import hmac
+import logging
 import uuid
 from datetime import datetime
 
-from app.core.config import settings
+from fastapi import Request, status
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
+
 from app.core.cache import get_cache_manager
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.utils import make_tz_aware, utc_now
 
 logger = get_logger(__name__)
 
+# ---------------------------------------------------------------------------
+# Request-ID context variable & logging filter
+# ---------------------------------------------------------------------------
+
+# Per-request context var that RequestIDMiddleware sets and RequestIDFilter reads.
+_current_request_id: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "request_id", default=""
+)
+
+
+class RequestIDFilter(logging.Filter):
+    """Inject the current request ID into every log record.
+
+    When the ``RequestIDMiddleware`` has set ``_current_request_id`` for the
+    current async task, this filter copies the value onto the log record as
+    ``record.request_id``.  The ``StructuredFormatter`` (production JSON logs)
+    then surfaces it as ``correlation_id``.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        request_id = _current_request_id.get("")
+        if request_id:
+            record.request_id = request_id
+        return True
+
 
 class RequestLoggingMiddleware:
     """
     Pure ASGI middleware for logging all incoming requests, including MCP paths.
-
-    Uses raw ASGI instead of BaseHTTPMiddleware to avoid issues with streaming responses.
     """
 
     def __init__(self, app: ASGIApp, prefix: str = ""):
@@ -32,7 +59,6 @@ class RequestLoggingMiddleware:
             path = scope.get("path", "?")
             query = scope.get("query_string", b"").decode("utf-8", errors="ignore")
 
-            # Log every incoming request
             full_path = f"{self.prefix}{path}" if self.prefix else path
             logger.info(
                 "Incoming request",
@@ -45,100 +71,179 @@ class RequestLoggingMiddleware:
 
         await self.app(scope, receive, send)
 
-class RequestIDMiddleware(BaseHTTPMiddleware):
-    """Add unique request ID to each request for tracing"""
 
-    async def dispatch(self, request: Request, call_next):
-        # Skip for MCP paths (streaming incompatible with BaseHTTPMiddleware)
-        if request.url.path.startswith("/mcp"):
-            return await call_next(request)
+class RequestIDMiddleware:
+    """Add unique request ID to each request for tracing.
+
+    Implemented as pure ASGI middleware to avoid BaseHTTPMiddleware
+    deprecation in Starlette 1.0+ and to support streaming responses.
+    """
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        if scope["type"] == "websocket":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "/")
+
+        # Skip request ID only for MCP streaming tool routes.
+        # OAuth endpoints (/mcp/oauth/*) still need request IDs.
+        if path.startswith("/mcp") and not (
+            path.startswith("/mcp/oauth")
+            or path.startswith("/mcp-admin/oauth")
+        ):
+            await self.app(scope, receive, send)
+            return
 
         # Generate or use existing request ID
-        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        headers = dict(scope.get("headers", []))
+        request_id = headers.get(b"x-request-id", b"").decode("utf-8", errors="ignore")
+        if not request_id:
+            request_id = str(uuid.uuid4())
 
-        # Store request ID in request state for logging
-        request.state.request_id = request_id
+        # Propagate request_id to logging context via contextvar
+        _current_request_id.set(request_id)
 
-        # Process request
-        response = await call_next(request)
+        # Store request ID in scope state
+        if "state" not in scope:
+            scope["state"] = {}
+        scope["state"]["request_id"] = request_id
 
-        # Add request ID to response headers
-        response.headers["X-Request-ID"] = request_id
+        # Inject request ID into response headers
+        original_send = send
 
-        return response
+        async def send_with_request_id(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.append((b"X-Request-ID", request_id.encode()))
+                message["headers"] = headers
+            await original_send(message)
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Add security headers to all responses"""
+        await self.app(scope, receive, send_with_request_id)
 
-    async def dispatch(self, request: Request, call_next):
-        # Skip for MCP paths (streaming incompatible with BaseHTTPMiddleware)
-        if request.url.path.startswith("/mcp"):
-            return await call_next(request)
 
-        response = await call_next(request)
-        
-        # Security headers
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+class SecurityHeadersMiddleware:
+    """Add security headers to all responses.
 
-        # Only send HSTS on production HTTPS deployments.
-        if settings.ENVIRONMENT == "production":
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        
-        # Content Security Policy
-        if settings.ENVIRONMENT == "production":
-            response.headers["Content-Security-Policy"] = (
-                "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-                "style-src 'self' 'unsafe-inline'; "
-                "img-src 'self' data: https:; "
-                "font-src 'self' data:; "
-                "connect-src 'self' https://api.supabase.co"
-            )
-        
-        return response
+    Implemented as pure ASGI middleware to avoid BaseHTTPMiddleware
+    deprecation in Starlette 1.0+ and to support streaming responses.
+    """
 
-class APIKeyMiddleware(BaseHTTPMiddleware):
-    """API key validation for external API access"""
-    
-    def __init__(self, app, required_paths: List[str] = None):
-        super().__init__(app)
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        if scope["type"] == "websocket":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "/")
+
+        # Skip security headers only for MCP streaming tool routes.
+        # OAuth endpoints (/mcp/oauth/*) and well-known paths still need headers.
+        if path.startswith("/mcp") and not (
+            path.startswith("/mcp/oauth")
+            or path.startswith("/mcp-admin/oauth")
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        # Inject security headers into the response
+        original_send = send
+
+        async def send_with_security_headers(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.append((b"X-Content-Type-Options", b"nosniff"))
+                headers.append((b"X-Frame-Options", b"DENY"))
+                headers.append((b"X-XSS-Protection", b"1; mode=block"))
+                headers.append((b"Referrer-Policy", b"strict-origin-when-cross-origin"))
+
+                if settings.ENVIRONMENT == "production":
+                    headers.append((b"Strict-Transport-Security", b"max-age=31536000; includeSubDomains"))
+                    headers.append((b"Content-Security-Policy",
+                        b"default-src 'self'; "
+                        b"script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+                        b"style-src 'self' 'unsafe-inline'; "
+                        b"img-src 'self' data: https:; "
+                        b"font-src 'self' data:; "
+                        b"connect-src 'self' https://api.supabase.co"))
+
+                message["headers"] = headers
+            await original_send(message)
+
+        await self.app(scope, receive, send_with_security_headers)
+
+
+class APIKeyMiddleware:
+    """API key validation for external API access.
+
+    Implemented as pure ASGI middleware to avoid BaseHTTPMiddleware
+    deprecation in Starlette 1.0+ and to support streaming responses.
+    """
+
+    def __init__(self, app: ASGIApp, required_paths: list[str] | None = None):
+        self.app = app
         self.required_paths = required_paths or []
-    
-    async def dispatch(self, request: Request, call_next):
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        if scope["type"] == "websocket":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "/")
+
         # Check if path requires API key
-        if any(request.url.path.startswith(path) for path in self.required_paths):
-            api_key = request.headers.get("X-API-Key")
-            
+        if any(path.startswith(rp) for rp in self.required_paths):
+            headers = dict(scope.get("headers", []))
+            api_key = headers.get(b"x-api-key", b"").decode("utf-8", errors="ignore")
+
             if not api_key:
-                raise HTTPException(
+                response = JSONResponse(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="API key required"
+                    content={"detail": "API key required"},
                 )
-            
+                await response(scope, receive, send)
+                return
+
             if not await self.validate_api_key(api_key):
-                raise HTTPException(
+                response = JSONResponse(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Invalid API key"
+                    content={"detail": "Invalid API key"},
                 )
-        
-        return await call_next(request)
-    
+                await response(scope, receive, send)
+                return
+
+        await self.app(scope, receive, send)
+
     async def validate_api_key(self, api_key: str) -> bool:
         """Validate API key against stored keys"""
         cache = get_cache_manager()
 
         # Check cache first
-        cache_key = f"api_key:{api_key[:10]}"
+        cache_key = f"api_key:{hashlib.sha256(api_key.encode()).hexdigest()[:16]}"
         cached = await cache.get(cache_key)
         if cached is not None:
             return cached
 
         # In production, check against database
         # For now, check against environment variable
-        valid = api_key in settings.VALID_API_KEYS.split(",")
+        valid = any(hmac.compare_digest(api_key, k.strip()) for k in settings.VALID_API_KEYS.split(",") if k.strip())
 
         # Cache result
         await cache.set(cache_key, valid, ttl=300)
@@ -147,7 +252,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
 
 class RequestSignatureValidator:
     """Validate request signatures for webhook security"""
-    
+
     @staticmethod
     def generate_signature(
         secret: str,
@@ -157,14 +262,14 @@ class RequestSignatureValidator:
         timestamp: str
     ) -> str:
         """Generate HMAC signature for request"""
-        message = f"{method}:{path}:{body.decode('utf-8')}:{timestamp}"
+        message = f"{method}:{path}:{body.decode('utf-8', errors='replace')}:{timestamp}"
         signature = hmac.new(
             secret.encode(),
             message.encode(),
             hashlib.sha256
         ).hexdigest()
         return signature
-    
+
     @staticmethod
     async def validate_request(
         request: Request,
@@ -175,13 +280,15 @@ class RequestSignatureValidator:
         # Get signature and timestamp from headers
         signature = request.headers.get("X-Signature")
         timestamp = request.headers.get("X-Timestamp")
-        
+
         if not signature or not timestamp:
             return False
-        
+
         # Check timestamp age
         try:
-            request_time = make_tz_aware(datetime.fromisoformat(timestamp))
+            # Normalize ISO 8601 'Z' suffix for Python < 3.11 compatibility
+            normalized_ts = timestamp.replace("Z", "+00:00")
+            request_time = make_tz_aware(datetime.fromisoformat(normalized_ts))
             if request_time is None:
                 return False
             if (utc_now() - request_time).total_seconds() > max_age_seconds:
@@ -189,10 +296,10 @@ class RequestSignatureValidator:
                 return False
         except ValueError:
             return False
-        
+
         # Get request body
         body = await request.body()
-        
+
         # Generate expected signature
         expected_signature = RequestSignatureValidator.generate_signature(
             secret,
@@ -201,40 +308,58 @@ class RequestSignatureValidator:
             body,
             timestamp
         )
-        
+
         # Compare signatures
         return hmac.compare_digest(signature, expected_signature)
 
-class IPWhitelistMiddleware(BaseHTTPMiddleware):
-    """IP whitelist middleware for admin endpoints"""
-    
-    def __init__(self, app, whitelist: List[str] = None, paths: List[str] = None):
-        super().__init__(app)
+class IPWhitelistMiddleware:
+    """IP whitelist middleware for admin endpoints.
+
+    Implemented as pure ASGI middleware to avoid BaseHTTPMiddleware
+    deprecation in Starlette 1.0+ and to support streaming responses.
+    """
+
+    def __init__(self, app: ASGIApp, whitelist: list[str] | None = None, paths: list[str] | None = None):
+        self.app = app
         self.whitelist = whitelist or []
         self.paths = paths or ["/admin"]
-    
-    async def dispatch(self, request: Request, call_next):
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        if scope["type"] == "websocket":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "/")
+
         # Check if path requires IP whitelisting
-        if any(request.url.path.startswith(path) for path in self.paths):
-            client_ip = self.get_client_ip(request)
-            
+        if any(path.startswith(p) for p in self.paths):
+            client_ip = self._get_client_ip(scope)
+
             if client_ip not in self.whitelist:
-                logger.warning(f"Unauthorized IP access attempt: {client_ip}")
-                raise HTTPException(
+                logger.warning("Unauthorized IP access attempt: %s", client_ip)
+                response = JSONResponse(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Access denied"
+                    content={"detail": "Access denied"},
                 )
-        
-        return await call_next(request)
-    
-    def get_client_ip(self, request: Request) -> str:
-        """Get real client IP address"""
-        forwarded = request.headers.get("X-Forwarded-For")
+                await response(scope, receive, send)
+                return
+
+        await self.app(scope, receive, send)
+
+    def _get_client_ip(self, scope: Scope) -> str:
+        """Get real client IP address from ASGI scope."""
+        headers = dict(scope.get("headers", []))
+        forwarded = headers.get(b"x-forwarded-for", b"").decode("utf-8", errors="ignore")
         if forwarded:
             return forwarded.split(",")[0].strip()
-        
-        real_ip = request.headers.get("X-Real-IP")
+
+        real_ip = headers.get(b"x-real-ip", b"").decode("utf-8", errors="ignore")
         if real_ip:
             return real_ip
-        
-        return request.client.host if request.client else "unknown"
+
+        client = scope.get("client")
+        return client[0] if client else "unknown"

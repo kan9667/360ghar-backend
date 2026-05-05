@@ -10,6 +10,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, UploadFile, Form, HTTPException, status
 
+from app.core.constants import DEFAULT_VISION_PROVIDER, VALID_VISION_PROVIDERS
 from app.core.logging import get_logger
 from app.services.ai.vastu import (
     analyze_vastu,
@@ -34,7 +35,7 @@ async def analyze_floor_plan(
     image: UploadFile = File(..., description="Floor plan image (JPEG, PNG, or WebP)"),
     north_direction: str = Form(default="up", description="Direction of North in the image: up, down, left, right, unknown"),
     notes: Optional[str] = Form(default=None, description="Additional notes about the property (max 1000 chars)"),
-    provider: Optional[str] = Form(default="gemini", description="AI provider: gemini or glm"),
+    provider: Optional[str] = Form(default=DEFAULT_VISION_PROVIDER, description="AI provider: gemini or glm"),
 ):
     """
     Analyze a floor plan image for Vastu Shastra compliance.
@@ -101,8 +102,8 @@ async def analyze_floor_plan(
         )
 
     # Validate provider
-    valid_providers = ["gemini", "glm"]
-    provider_clean = (provider or "gemini").lower().strip()
+    valid_providers = list(VALID_VISION_PROVIDERS)
+    provider_clean = (provider or DEFAULT_VISION_PROVIDER).lower().strip()
     if provider_clean not in valid_providers:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -119,7 +120,7 @@ async def analyze_floor_plan(
         provider=provider_clean,
     )
 
-    logger.info(f"Starting Vastu analysis: provider={provider_clean}, north={north_dir.value}, file_size={len(content)}")
+    logger.info("Starting Vastu analysis: provider=%s, north=%s, file_size=%s", provider_clean, north_dir.value, len(content))
 
     # Analyze
     result = await analyze_vastu(
@@ -129,13 +130,13 @@ async def analyze_floor_plan(
     )
 
     if not result.success:
-        logger.warning(f"Vastu analysis failed: {result.error}")
+        logger.warning("Vastu analysis failed: %s", result.error)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=result.error or "Analysis failed. Please try with a clearer floor plan image."
         )
 
-    logger.info(f"Vastu analysis completed: score={result.data.vastu_score if result.data else 'N/A'}")
+    logger.info("Vastu analysis completed: score=%s", result.data.vastu_score if result.data else 'N/A')
 
     return result
 
@@ -146,5 +147,5 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "vastu-analyzer",
-        "providers": ["gemini", "glm"],
+        "providers": list(VALID_VISION_PROVIDERS),
     }

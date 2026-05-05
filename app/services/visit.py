@@ -1,14 +1,108 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_, func
-from sqlalchemy.orm import selectinload, aliased
 from datetime import datetime, timezone
-from app.models.properties import Visit, Property
-from app.models.agents import Agent
-from app.models.users import User
-from app.schemas.visit import VisitCreate, VisitUpdate, Visit as VisitSchema
-from app.core.utils import make_tz_aware
+
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased, selectinload
+
 from app.core.exceptions import BadRequestException
-from typing import Optional
+from app.core.utils import make_tz_aware
+from app.models.enums import ConversationStatus, UserMatchStatus, VisitContext
+from app.models.properties import Property, Visit
+from app.models.social import UserConversation, UserMatch
+from app.models.users import User
+from app.schemas.visit import Visit as VisitSchema
+from app.schemas.visit import VisitCreate, VisitUpdate
+
+
+def _visit_load_options():
+    return (
+        selectinload(Visit.property).selectinload(Property.images),
+        selectinload(Visit.property).selectinload(Property.property_amenities),
+        selectinload(Visit.counterparty_user),
+    )
+
+
+def _canonical_pair(user_id: int, other_user_id: int) -> tuple[int, int]:
+    return (user_id, other_user_id) if user_id < other_user_id else (other_user_id, user_id)
+
+
+async def _validate_flatmate_visit_context(
+    db: AsyncSession,
+    user_id: int,
+    visit_data: dict,
+) -> None:
+    counterparty_user_id = visit_data.get("counterparty_user_id")
+    if counterparty_user_id is None:
+        raise BadRequestException(detail="counterparty_user_id is required for flatmate meetings")
+    if counterparty_user_id == user_id:
+        raise BadRequestException(detail="counterparty_user_id must be different from user_id")
+
+    user_one_id, user_two_id = _canonical_pair(user_id, counterparty_user_id)
+    authorized = False
+
+    conversation_id = visit_data.get("conversation_id")
+    if conversation_id is not None:
+        conversation = (
+            await db.execute(
+                select(UserConversation).where(
+                    UserConversation.id == conversation_id,
+                    UserConversation.user_one_id == user_one_id,
+                    UserConversation.user_two_id == user_two_id,
+                    UserConversation.status == ConversationStatus.active.value,
+                )
+            )
+        ).scalar_one_or_none()
+        if conversation is None:
+            raise BadRequestException(detail="Invalid flatmate conversation")
+        authorized = True
+
+    match_id = visit_data.get("match_id")
+    if match_id is not None:
+        match = (
+            await db.execute(
+                select(UserMatch).where(
+                    UserMatch.id == match_id,
+                    UserMatch.user_one_id == user_one_id,
+                    UserMatch.user_two_id == user_two_id,
+                    UserMatch.status == UserMatchStatus.active.value,
+                )
+            )
+        ).scalar_one_or_none()
+        if match is None:
+            raise BadRequestException(detail="Invalid flatmate match")
+        authorized = True
+
+    if authorized:
+        return
+
+    conversation = (
+        await db.execute(
+            select(UserConversation).where(
+                UserConversation.user_one_id == user_one_id,
+                UserConversation.user_two_id == user_two_id,
+                UserConversation.status == ConversationStatus.active.value,
+            )
+        )
+    ).scalar_one_or_none()
+    if conversation is not None:
+        visit_data["conversation_id"] = conversation.id
+        return
+
+    match = (
+        await db.execute(
+            select(UserMatch).where(
+                UserMatch.user_one_id == user_one_id,
+                UserMatch.user_two_id == user_two_id,
+                UserMatch.status == UserMatchStatus.active.value,
+            )
+        )
+    ).scalar_one_or_none()
+    if match is not None:
+        visit_data["match_id"] = match.id
+        return
+
+    raise BadRequestException(detail="Flatmate meeting requires an active conversation or match")
+
 
 async def create_visit(db: AsyncSession, user_id: int, visit: VisitCreate):
     """Create a new visit"""
@@ -26,40 +120,56 @@ async def create_visit(db: AsyncSession, user_id: int, visit: VisitCreate):
     now = datetime.now(timezone.utc)
     if scheduled_date < now:
         raise BadRequestException(detail="scheduled_date must be in the future")
-    
+    if visit_data.get("visit_context") == VisitContext.flatmate_meet:
+        await _validate_flatmate_visit_context(db, user_id, visit_data)
+    elif visit_data.get("counterparty_user_id") is not None:
+        raise BadRequestException(detail="counterparty_user_id is only supported for flatmate meetings")
+
     db_visit = Visit(**visit_data)
     db.add(db_visit)
     # Flush to assign PK, then re-select with eager-loaded relationships
     await db.flush()
     stmt = (
         select(Visit)
-        .options(
-            selectinload(Visit.property).selectinload(Property.images),
-            selectinload(Visit.property).selectinload(Property.property_amenities),
-        )
+        .options(*_visit_load_options())
         .where(Visit.id == db_visit.id)
     )
     result = await db.execute(stmt)
-    return result.scalar_one()
+    visit_obj = result.scalar_one()
+
+    # --- Push notification on visit creation ---
+    try:
+        from app.services.push_notification import notify_visit_scheduled
+        # Notify the counterparty (flatmate meet) or the property owner
+        if visit_obj.counterparty_user_id:
+            await notify_visit_scheduled(
+                db,
+                recipient_db_id=visit_obj.counterparty_user_id,
+                property_title=visit_obj.property.title if visit_obj.property and visit_obj.property.title else "the property",
+                scheduled_date=visit_obj.scheduled_date.isoformat(),
+            )
+    except Exception:
+        pass  # best-effort; never block visit creation
+
+    return visit_obj
 
 async def get_visit(db: AsyncSession, visit_id: int):
     """Get a visit by ID"""
-    stmt = select(Visit).options(
-        selectinload(Visit.property).selectinload(Property.images),
-        selectinload(Visit.property).selectinload(Property.property_amenities)
-    ).where(Visit.id == visit_id)
+    stmt = select(Visit).options(*_visit_load_options()).where(Visit.id == visit_id)
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
 async def get_user_visits(db: AsyncSession, user_id: int):
     """Get all visits for a user"""
-    stmt = select(Visit).options(
-        selectinload(Visit.property).selectinload(Property.images),
-        selectinload(Visit.property).selectinload(Property.property_amenities)
-    ).where(Visit.user_id == user_id).order_by(Visit.scheduled_date.desc())
+    stmt = (
+        select(Visit)
+        .options(*_visit_load_options())
+        .where(or_(Visit.user_id == user_id, Visit.counterparty_user_id == user_id))
+        .order_by(Visit.scheduled_date.desc())
+    )
     result = await db.execute(stmt)
     visits = result.scalars().all()
-    
+
     # Count visits by status (handle tz-naive dates from DB)
     now = datetime.now(timezone.utc)
     upcoming = sum(
@@ -69,9 +179,9 @@ async def get_user_visits(db: AsyncSession, user_id: int):
     )
     completed = sum(1 for v in visits if v.status == "completed")
     cancelled = sum(1 for v in visits if v.status == "cancelled")
-    
+
     return {
-        "visits": visits, 
+        "visits": visits,
         "total": len(visits),
         "upcoming": upcoming,
         "completed": completed,
@@ -81,14 +191,16 @@ async def get_user_visits(db: AsyncSession, user_id: int):
 async def get_user_upcoming_visits(db: AsyncSession, user_id: int):
     """Get upcoming visits for a user"""
     now = datetime.now(timezone.utc)
-    stmt = select(Visit).options(
-        selectinload(Visit.property).selectinload(Property.images),
-        selectinload(Visit.property).selectinload(Property.property_amenities)
-    ).where(
-        Visit.user_id == user_id,
-        Visit.scheduled_date > now,
-        Visit.status.in_(["scheduled", "confirmed", "rescheduled"])
-    ).order_by(Visit.scheduled_date)
+    stmt = (
+        select(Visit)
+        .options(*_visit_load_options())
+        .where(
+            or_(Visit.user_id == user_id, Visit.counterparty_user_id == user_id),
+            Visit.scheduled_date > now,
+            Visit.status.in_(["scheduled", "confirmed", "rescheduled"])
+        )
+        .order_by(Visit.scheduled_date)
+    )
     result = await db.execute(stmt)
     visits = result.scalars().all()
     return {"visits": visits, "total": len(visits)}
@@ -96,13 +208,15 @@ async def get_user_upcoming_visits(db: AsyncSession, user_id: int):
 async def get_user_past_visits(db: AsyncSession, user_id: int):
     """Get past visits for a user"""
     now = datetime.now(timezone.utc)
-    stmt = select(Visit).options(
-        selectinload(Visit.property).selectinload(Property.images),
-        selectinload(Visit.property).selectinload(Property.property_amenities)
-    ).where(
-        Visit.user_id == user_id,
-        Visit.scheduled_date < now
-    ).order_by(Visit.scheduled_date.desc())
+    stmt = (
+        select(Visit)
+        .options(*_visit_load_options())
+        .where(
+            or_(Visit.user_id == user_id, Visit.counterparty_user_id == user_id),
+            Visit.scheduled_date < now
+        )
+        .order_by(Visit.scheduled_date.desc())
+    )
     result = await db.execute(stmt)
     visits = result.scalars().all()
     return {"visits": visits, "total": len(visits)}
@@ -112,25 +226,50 @@ async def update_visit(db: AsyncSession, visit_id: int, visit_update: VisitUpdat
     stmt = select(Visit).where(Visit.id == visit_id)
     result = await db.execute(stmt)
     visit = result.scalar_one_or_none()
-    
+
     if visit:
+        old_status = visit.status
         update_data = visit_update.model_dump(exclude_unset=True)
         for field, value in update_data.items():
             setattr(visit, field, value)
-        
+
         await db.flush()
         # Re-select with eager-loaded relationships to avoid async lazy-loads during serialization
         stmt = (
             select(Visit)
-            .options(
-                selectinload(Visit.property).selectinload(Property.images),
-                selectinload(Visit.property).selectinload(Property.property_amenities),
-            )
+            .options(*_visit_load_options())
             .where(Visit.id == visit_id)
         )
         result = await db.execute(stmt)
-        return result.scalar_one_or_none()
-    
+        updated_visit = result.scalar_one_or_none()
+
+        # --- Push notification on visit confirmation ---
+        new_status = update_data.get("status")
+        if new_status == "confirmed" and old_status != "confirmed" and updated_visit:
+            try:
+                from app.services.push_notification import notify_visit_confirmed
+                scheduled_str = updated_visit.scheduled_date.isoformat() if updated_visit.scheduled_date else "TBD"
+                prop_title = updated_visit.property.title if updated_visit.property and updated_visit.property.title else "the property"
+                # Notify the visiting user
+                await notify_visit_confirmed(
+                    db,
+                    recipient_db_id=updated_visit.user_id,
+                    property_title=prop_title,
+                    scheduled_date=scheduled_str,
+                )
+                # Notify the counterparty if present
+                if updated_visit.counterparty_user_id:
+                    await notify_visit_confirmed(
+                        db,
+                        recipient_db_id=updated_visit.counterparty_user_id,
+                        property_title=prop_title,
+                        scheduled_date=scheduled_str,
+                    )
+            except Exception:
+                pass  # best-effort; never block visit update
+
+        return updated_visit
+
     return None
 
 async def cancel_visit(db: AsyncSession, visit_id: int, reason: str):
@@ -157,16 +296,13 @@ async def cancel_visit(db: AsyncSession, visit_id: int, reason: str):
     # Re-select with eager-loaded relationships for serialization safety
     stmt = (
         select(Visit)
-        .options(
-            selectinload(Visit.property).selectinload(Property.images),
-            selectinload(Visit.property).selectinload(Property.property_amenities),
-        )
+        .options(*_visit_load_options())
         .where(Visit.id == visit_id)
     )
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
-async def reschedule_visit(db: AsyncSession, visit_id: int, new_date: datetime, reason: Optional[str] = None):
+async def reschedule_visit(db: AsyncSession, visit_id: int, new_date: datetime, reason: str | None = None):
     """Reschedule a visit and return the updated visit with relationships.
 
     Returns:
@@ -201,10 +337,7 @@ async def reschedule_visit(db: AsyncSession, visit_id: int, new_date: datetime, 
     # Re-select with eager-loaded relationships for serialization safety
     stmt = (
         select(Visit)
-        .options(
-            selectinload(Visit.property).selectinload(Property.images),
-            selectinload(Visit.property).selectinload(Property.property_amenities),
-        )
+        .options(*_visit_load_options())
         .where(Visit.id == visit_id)
     )
     result = await db.execute(stmt)
@@ -217,10 +350,7 @@ async def get_agent_visits(db: AsyncSession, agent_id: int, page: int = 1, limit
     # Page data
     stmt = (
         select(Visit)
-        .options(
-            selectinload(Visit.property).selectinload(Property.images),
-            selectinload(Visit.property).selectinload(Property.property_amenities),
-        )
+        .options(*_visit_load_options())
         .where(Visit.agent_id == agent_id)
         .order_by(Visit.scheduled_date.desc())
         .offset(offset)
@@ -255,7 +385,7 @@ async def mark_visit_completed(db: AsyncSession, visit_id: int, notes: str = Non
     stmt = select(Visit).where(Visit.id == visit_id)
     result = await db.execute(stmt)
     visit = result.scalar_one_or_none()
-    
+
     if visit:
         visit.status = "completed"
         visit.actual_date = datetime.now(timezone.utc)
@@ -265,7 +395,7 @@ async def mark_visit_completed(db: AsyncSession, visit_id: int, notes: str = Non
             visit.visitor_feedback = feedback
         await db.flush()
         return True
-    
+
     return False
 
 async def get_user_property_visit_stats(db: AsyncSession, user_id: int, property_id: int):
@@ -298,10 +428,10 @@ async def get_all_visits(
     *,
     page: int = 1,
     limit: int = 20,
-    status: Optional[str] = None,
-    filter_agent_id: Optional[int] = None,
-    property_id: Optional[int] = None,
-    user_id: Optional[int] = None,
+    status: str | None = None,
+    filter_agent_id: int | None = None,
+    property_id: int | None = None,
+    user_id: int | None = None,
 ):
     """Global visit listing with optional filters and pagination.
 
@@ -311,8 +441,7 @@ async def get_all_visits(
     Owner = aliased(User)
 
     base = select(Visit).options(
-        selectinload(Visit.property).selectinload(Property.images),
-        selectinload(Visit.property).selectinload(Property.property_amenities),
+        *_visit_load_options(),
     )
     filters = []
     if status:

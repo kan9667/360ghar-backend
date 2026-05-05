@@ -43,7 +43,7 @@ def start_vector_sync_scheduler(app: FastAPI):
             stats = await run_property_vector_sync()
             logger.info("Vector sync pass completed", extra=stats)
         except Exception as e:  # noqa: BLE001
-            logger.error(f"Vector sync job failed: {e}")
+            logger.error("Vector sync job failed: %s", e)
 
     sched.add_job(job_wrapper, trig, id="property_vector_sync", replace_existing=True, max_instances=1)
     sched.start()

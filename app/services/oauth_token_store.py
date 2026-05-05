@@ -16,6 +16,11 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+class OAuthStorageError(Exception):
+    """Raised when OAuth token store cannot persist or retrieve security-critical data."""
+    pass
+
+
 class OAuthTokenStore:
     """OAuth token store delegating to the app-wide CacheManager.
 
@@ -28,6 +33,17 @@ class OAuthTokenStore:
     @staticmethod
     def _key(prefix: str, identifier: str) -> str:
         return f"oauth:{prefix}:{identifier}"
+
+    def _ensure_cache_available(self) -> None:
+        """Ensure cache backend is not NullCacheBackend for security-critical operations."""
+        from app.core.cache.manager import NullCacheBackend
+
+        cache = get_cache_manager()
+        if isinstance(cache.backend, NullCacheBackend):
+            raise OAuthStorageError(
+                "OAuth token store cannot operate with NullCacheBackend — "
+                "configure Redis or in-memory cache for production"
+            )
 
     # ------------------------------------------------------------------
     # Authorization Codes
@@ -45,6 +61,7 @@ class OAuthTokenStore:
         resource: Optional[str] = None,
         expires_in: int = 600,
     ) -> bool:
+        self._ensure_cache_available()
         try:
             cache = get_cache_manager()
             data = {
@@ -62,20 +79,18 @@ class OAuthTokenStore:
             logger.debug("Stored auth code", extra={"user_id": user_id, "client_id": client_id})
             return True
         except Exception as e:
-            logger.error(f"Failed to store auth code: {e}")
-            return False
+            logger.error("Failed to store auth code: %s", e)
+            raise OAuthStorageError(f"Failed to store auth code: {e}") from e
 
     async def get_auth_code(self, code: str) -> Optional[Dict[str, Any]]:
-        """Retrieve and consume an authorization code (one-time use)."""
+        """Retrieve and consume an authorization code (one-time use, atomic)."""
         try:
             cache = get_cache_manager()
             key = self._key("auth_code", code)
-            data = await cache.get(key)
+            data = await cache.get_and_delete(key)
             if data is None:
-                logger.debug("Auth code not found")
+                logger.debug("Auth code not found or already consumed")
                 return None
-            # Consume: delete immediately after retrieval
-            await cache.delete(key)
             # Check if expired (belt-and-suspenders for in-memory backend)
             if time.time() > data.get("expires_at", 0):
                 logger.debug("Auth code expired")
@@ -83,7 +98,7 @@ class OAuthTokenStore:
             logger.debug("Auth code retrieved and consumed", extra={"user_id": data.get("user_id")})
             return data
         except Exception as e:
-            logger.error(f"Failed to get auth code: {e}")
+            logger.error("Failed to get auth code: %s", e)
             return None
 
     async def delete_auth_code(self, code: str) -> bool:
@@ -92,7 +107,7 @@ class OAuthTokenStore:
             await cache.delete(self._key("auth_code", code))
             return True
         except Exception as e:
-            logger.error(f"Failed to delete auth code: {e}")
+            logger.error("Failed to delete auth code: %s", e)
             return False
 
     # ------------------------------------------------------------------
@@ -110,6 +125,7 @@ class OAuthTokenStore:
         access_token_expires_in: int = 3600,
         refresh_token_expires_in: int = 2592000,
     ) -> bool:
+        self._ensure_cache_available()
         try:
             cache = get_cache_manager()
             now = time.time()
@@ -148,11 +164,11 @@ class OAuthTokenStore:
             })
             await cache.set(user_tokens_key, existing, ttl=refresh_token_expires_in)
 
-            logger.debug(f"Stored OAuth tokens for user {user_id}")
+            logger.debug("Stored OAuth tokens for user %s", user_id)
             return True
         except Exception as e:
-            logger.error(f"Failed to store OAuth tokens: {e}")
-            return False
+            logger.error("Failed to store OAuth tokens: %s", e)
+            raise OAuthStorageError(f"Failed to store OAuth tokens: {e}") from e
 
     async def get_access_token(self, access_token: str) -> Optional[Dict[str, Any]]:
         try:
@@ -169,7 +185,7 @@ class OAuthTokenStore:
             logger.debug("Access token found", extra={"user_id": data.get("user_id")})
             return data
         except Exception as e:
-            logger.error(f"Failed to get access token: {e}")
+            logger.error("Failed to get access token: %s", e)
             return None
 
     async def get_refresh_token(self, refresh_token: str) -> Optional[Dict[str, Any]]:
@@ -183,7 +199,7 @@ class OAuthTokenStore:
                 return None
             return data
         except Exception as e:
-            logger.error(f"Failed to get refresh token: {e}")
+            logger.error("Failed to get refresh token: %s", e)
             return None
 
     async def revoke_token(self, token: str) -> bool:
@@ -193,7 +209,7 @@ class OAuthTokenStore:
             logger.debug("Revoked access token")
             return True
         except Exception as e:
-            logger.error(f"Failed to revoke token: {e}")
+            logger.error("Failed to revoke token: %s", e)
             return False
 
     async def delete_refresh_token(self, refresh_token: str) -> bool:
@@ -202,7 +218,7 @@ class OAuthTokenStore:
             await cache.delete(self._key("refresh_token", refresh_token))
             return True
         except Exception as e:
-            logger.error(f"Failed to delete refresh token: {e}")
+            logger.error("Failed to delete refresh token: %s", e)
             return False
 
     async def revoke_refresh_token(self, refresh_token: str) -> bool:
@@ -213,7 +229,7 @@ class OAuthTokenStore:
             await self.delete_refresh_token(refresh_token)
             return True
         except Exception as e:
-            logger.error(f"Failed to revoke refresh token: {e}")
+            logger.error("Failed to revoke refresh token: %s", e)
             return False
 
     async def revoke_token_pair(
@@ -237,7 +253,7 @@ class OAuthTokenStore:
 
             return True
         except Exception as e:
-            logger.error(f"Failed to revoke token pair: {e}")
+            logger.error("Failed to revoke token pair: %s", e)
             return False
 
     # ------------------------------------------------------------------
@@ -256,6 +272,7 @@ class OAuthTokenStore:
         resource: Optional[str] = None,
         expires_in: int = 1800,
     ) -> bool:
+        self._ensure_cache_available()
         try:
             cache = get_cache_manager()
             data = {
@@ -272,8 +289,8 @@ class OAuthTokenStore:
             await cache.set(self._key("session", session_id), data, ttl=expires_in)
             return True
         except Exception as e:
-            logger.error(f"Failed to store OAuth session: {e}")
-            return False
+            logger.error("Failed to store OAuth session: %s", e)
+            raise OAuthStorageError(f"Failed to store OAuth session: {e}") from e
 
     async def get_oauth_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         try:
@@ -286,7 +303,7 @@ class OAuthTokenStore:
                 return None
             return data
         except Exception as e:
-            logger.error(f"Failed to get OAuth session: {e}")
+            logger.error("Failed to get OAuth session: %s", e)
             return None
 
     async def delete_session(self, session_id: str) -> bool:
@@ -295,7 +312,7 @@ class OAuthTokenStore:
             await cache.delete(self._key("session", session_id))
             return True
         except Exception as e:
-            logger.error(f"Failed to delete OAuth session: {e}")
+            logger.error("Failed to delete OAuth session: %s", e)
             return False
 
     # ------------------------------------------------------------------
@@ -321,11 +338,11 @@ class OAuthTokenStore:
             else:
                 # No expiry — use a very long TTL (10 years) since CacheManager requires one
                 await cache.set(self._key("client", client_id), data, ttl=315360000)
-            logger.info(f"Stored OAuth client: {client_id}")
+            logger.info("Stored OAuth client: %s", client_id)
             return True
         except Exception as e:
-            logger.error(f"Failed to store OAuth client: {e}")
-            return False
+            logger.error("Failed to store OAuth client: %s", e)
+            raise OAuthStorageError(f"Failed to store OAuth client: {e}") from e
 
     async def get_client(self, client_id: str) -> Optional[Dict[str, Any]]:
         try:
@@ -342,17 +359,17 @@ class OAuthTokenStore:
                     data[field] = ""
             return data
         except Exception as e:
-            logger.error(f"Failed to get OAuth client: {e}")
+            logger.error("Failed to get OAuth client: %s", e)
             return None
 
     async def delete_client(self, client_id: str) -> bool:
         try:
             cache = get_cache_manager()
             await cache.delete(self._key("client", client_id))
-            logger.info(f"Deleted OAuth client: {client_id}")
+            logger.info("Deleted OAuth client: %s", client_id)
             return True
         except Exception as e:
-            logger.error(f"Failed to delete OAuth client: {e}")
+            logger.error("Failed to delete OAuth client: %s", e)
             return False
 
 

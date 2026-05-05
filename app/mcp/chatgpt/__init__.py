@@ -230,11 +230,11 @@ def register_chatgpt_widgets(mcp: FastMCP) -> None:
                 _TOOL_WIDGET_URIS[tool_name] = resource_uri
 
             registered_count += 1
-            logger.info(f"Registered ChatGPT widget: {widget_name} -> {resource_uri}")
+            logger.info("Registered ChatGPT widget: %s -> %s", widget_name, resource_uri)
         else:
-            logger.debug(f"Widget not found (build required): {widget_name}")
+            logger.debug("Widget not found (build required): %s", widget_name)
 
-    logger.info(f"Registered {registered_count}/{len(WIDGETS)} ChatGPT widgets")
+    logger.info("Registered %s/%s ChatGPT widgets", registered_count, len(WIDGETS))
 
 
 def register_chatgpt_tools(mcp: FastMCP) -> None:

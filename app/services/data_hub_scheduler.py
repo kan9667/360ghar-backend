@@ -22,7 +22,7 @@ _WEEKLY_CRON = "0 2 * * 1"        # Monday
 _QUARTERLY_CRON = "0 2 1 4,10 *"  # Apr 1 + Oct 1
 
 # Limit concurrent scrapers to avoid saturating PgBouncer connections.
-_SCRAPER_SEMAPHORE = asyncio.Semaphore(2)
+_SCRAPER_SEMAPHORE = asyncio.Semaphore(3)
 
 
 async def _run_scraper_limited(scraper):
@@ -32,8 +32,13 @@ async def _run_scraper_limited(scraper):
 
 
 async def _run_daily_scrapers() -> None:
-    """Bank auctions, gazette, court auctions, neighbourhood scores, alert matching."""
+    """Bank auctions, HSVP, DDA, MDA, YEIDA, aggregator, gazette, court auctions, neighbourhood scores, alert matching."""
     from app.services.data_hub.bank_auctions import BankAuctionScraper
+    from app.services.data_hub.hsvp_auctions import HsvpAuctionScraper
+    from app.services.data_hub.dda_auctions import DdaAuctionScraper
+    from app.services.data_hub.mda_auctions import MdaAuctionScraper
+    from app.services.data_hub.yeida_auctions import YeidaAuctionScraper
+    from app.services.data_hub.aggregator_eauctions import AggregatorEauctionsScraper
     from app.services.data_hub.gazette import GazetteScraper
     from app.services.data_hub.court_auctions import CourtAuctionScraper
     from app.services.data_hub.neighbourhood import NeighbourhoodScraper
@@ -41,6 +46,11 @@ async def _run_daily_scrapers() -> None:
 
     scrapers = [
         BankAuctionScraper(),
+        HsvpAuctionScraper(),
+        DdaAuctionScraper(),
+        MdaAuctionScraper(),
+        YeidaAuctionScraper(),
+        AggregatorEauctionsScraper(),
         GazetteScraper(),
         CourtAuctionScraper(),
         NeighbourhoodScraper(),
@@ -55,15 +65,29 @@ async def _run_daily_scrapers() -> None:
 
 
 async def _run_weekly_scrapers() -> None:
-    """RERA projects, bank rates, RERA complaints."""
+    """RERA projects, bank rates, RERA complaints, Tier 2 auction scrapers, bank-specific scrapers."""
     from app.services.data_hub.rera_projects import ReraProjectScraper
     from app.services.data_hub.bank_rates import BankRateScraper
     from app.services.data_hub.rera_complaints import ReraComplaintScraper
+    from app.services.data_hub.baanknet_auctions import BaankNetAuctionScraper
+    from app.services.data_hub.ibbi_auctions import IBBIAuctionScraper
+    from app.services.data_hub.dfc_delhi_auctions import DFCDelhiAuctionScraper
+    from app.services.data_hub.drt_auctions import DRTAuctionScraper
+    from app.services.data_hub.hsvp_procure247_auctions import HSVPProcure247AuctionScraper
+    from app.services.data_hub.aggregator_misc import AggregatorMiscAuctionScraper
+    from app.services.data_hub.bank_specific_auctions import BankSpecificAuctionScraper
 
     scrapers = [
         ReraProjectScraper(),
         BankRateScraper(),
         ReraComplaintScraper(),
+        BaankNetAuctionScraper(),
+        IBBIAuctionScraper(),
+        DFCDelhiAuctionScraper(),
+        DRTAuctionScraper(),
+        HSVPProcure247AuctionScraper(),
+        AggregatorMiscAuctionScraper(),
+        BankSpecificAuctionScraper(),
     ]
     results = await asyncio.gather(*[_run_scraper_limited(s) for s in scrapers], return_exceptions=True)
     for scraper, result in zip(scrapers, results):

@@ -2,8 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 from app.core.database import get_db
+from app.core.db_resilience import extract_db_error_code, is_transient_db_error
 from app.core.config import settings
 from app.core.cache import cached, invalidate_cache, CacheKeyPatterns
+from app.core.exceptions import ServiceUnavailableException
 from app.core.logging import get_logger
 from app.api.api_v1.dependencies.auth import get_current_active_user, get_current_user_optional
 from app.models.enums import UserRole
@@ -50,8 +52,8 @@ async def create_post(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to create blog post: {e}", exc_info=True)
-        raise
+        logger.error("Error in create_post: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")
 
 
 @router.get("/posts", response_model=BlogPostListResponse)
@@ -89,8 +91,19 @@ async def list_posts(
             "has_prev": page > 1,
         }
     except Exception as e:
-        logger.error(f"Failed to list blog posts: {e}", exc_info=True)
-        raise
+        if is_transient_db_error(e):
+            error_code = extract_db_error_code(e) or "TRANSIENT_DB_ERROR"
+            logger.error(
+                "Blog list transient DB failure",
+                extra={"endpoint": "list_posts", "error_code": error_code},
+                exc_info=True,
+            )
+            raise ServiceUnavailableException(
+                detail="Blog listing is temporarily unavailable. Please retry shortly.",
+                details={"error_code": error_code, "endpoint": "list_posts"},
+            ) from e
+        logger.error("Error in list_posts: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")
 
 
 @router.get("/posts/{identifier}", response_model=BlogPost)
@@ -120,8 +133,8 @@ async def update_post(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update blog post: {e}", exc_info=True)
-        raise
+        logger.error("Error in update_post: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")
 
 
 @router.delete("/posts/{identifier}")
@@ -137,8 +150,8 @@ async def delete_post(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete blog post: {e}", exc_info=True)
-        raise
+        logger.error("Error in delete_post: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")
 
 
 # AI-powered generation endpoints
@@ -155,8 +168,8 @@ async def generate_from_topic(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Generation failed: {e}", exc_info=True)
-        raise
+        logger.error("Error in generate_from_topic: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")
 
 
 @router.post("/generate-bulk", response_model=List[BlogGenerationResult])
@@ -172,8 +185,8 @@ async def generate_bulk(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Bulk generation failed: {e}", exc_info=True)
-        raise
+        logger.error("Error in generate_bulk: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")
 
 
 # Category Management Endpoints
@@ -190,8 +203,8 @@ async def create_category_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to create category: {e}", exc_info=True)
-        raise
+        logger.error("Error in create_category_endpoint: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")
 
 
 @router.get("/categories", response_model=BlogCategoryListResponse)
@@ -215,8 +228,8 @@ async def list_categories_endpoint(
             "has_prev": page > 1,
         }
     except Exception as e:
-        logger.error(f"Failed to list categories: {e}", exc_info=True)
-        raise
+        logger.error("Error in list_categories_endpoint: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")
 
 
 @router.get("/categories/{identifier}", response_model=BlogCategory)
@@ -246,8 +259,8 @@ async def update_category_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update category: {e}", exc_info=True)
-        raise
+        logger.error("Error in update_category_endpoint: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")
 
 
 @router.delete("/categories/{identifier}")
@@ -264,8 +277,8 @@ async def delete_category_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete category: {e}", exc_info=True)
-        raise
+        logger.error("Error in delete_category_endpoint: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")
 
 
 # Tag Management Endpoints
@@ -282,8 +295,8 @@ async def create_tag_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to create tag: {e}", exc_info=True)
-        raise
+        logger.error("Error in create_tag_endpoint: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")
 
 
 @router.get("/tags", response_model=BlogTagListResponse)
@@ -307,8 +320,8 @@ async def list_tags_endpoint(
             "has_prev": page > 1,
         }
     except Exception as e:
-        logger.error(f"Failed to list tags: {e}", exc_info=True)
-        raise
+        logger.error("Error in list_tags_endpoint: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")
 
 
 @router.get("/tags/{identifier}", response_model=BlogTag)
@@ -338,8 +351,8 @@ async def update_tag_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update tag: {e}", exc_info=True)
-        raise
+        logger.error("Error in update_tag_endpoint: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")
 
 
 @router.delete("/tags/{identifier}")
@@ -356,5 +369,5 @@ async def delete_tag_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete tag: {e}", exc_info=True)
-        raise
+        logger.error("Error in delete_tag_endpoint: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.")

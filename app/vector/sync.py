@@ -43,7 +43,7 @@ async def _fetch_changed_properties(db: AsyncSession, since: datetime | None, li
     ]
 
     where = "WHERE TRUE"
-    params: Dict[str, Any] = {}
+    params: Dict[str, int | datetime] = {}
     if since is not None:
         where += " AND ((p.updated_at IS NOT NULL AND p.updated_at > :since) OR (p.updated_at IS NULL AND p.created_at > :since))"
         params["since"] = since
@@ -118,7 +118,7 @@ async def _process_batch(db: AsyncSession, props: List[Dict[str, Any]]) -> None:
         except Exception as e:  # noqa: BLE001
             # Propagate failures so the batch is retried and the watermark
             # is not advanced while embeddings are stale.
-            logger.error(f"Embedding API failed for batch of {len(texts_to_embed)}: {e}")
+            logger.error("Embedding API failed for batch of %s: %s", len(texts_to_embed), e)
             raise
         if not vectors or len(vectors) != len(texts_to_embed):
             # Defensive: avoid marking hashes as up-to-date if the embedding
@@ -138,7 +138,7 @@ async def _process_batch(db: AsyncSession, props: List[Dict[str, Any]]) -> None:
         await upsert_embedding(db, pid, emb, meta, h)
 
 
-async def run_property_vector_sync() -> Dict[str, Any]:
+async def run_property_vector_sync() -> Dict[str, int | bool]:
     """Entry point to run one incremental sync pass.
 
     Returns stats for logging/metrics.

@@ -38,7 +38,7 @@ def start_notification_scheduler(app: FastAPI):
             )
             logger.info("Daily marketing push job executed")
         except Exception as e:
-            logger.error(f"Daily marketing push job failed: {e}")
+            logger.error("Daily marketing push job failed: %s", e)
 
     sched.add_job(_daily_marketing_job, CronTrigger(hour=9, minute=0))
     sched.start()

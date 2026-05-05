@@ -212,14 +212,4 @@ class SupabaseAuthProvider(RemoteAuthProvider):
         )
 
 
-def configure_fastmcp_auth() -> None:
-    """
-    Log that auth is configured.
 
-    In FastMCP 3.0+, the global ``server_auth`` setting was removed.
-    Auth is handled via HTTP middleware (BearerAuthBackend) registered
-    on each MCP server's ``http_app()`` in ``factory.py``.
-
-    This function is kept as a no-op startup hook for compatibility.
-    """
-    logger.info("FastMCP auth configured via HTTP middleware (BearerAuthBackend)")

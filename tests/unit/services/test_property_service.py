@@ -60,14 +60,14 @@ class TestCreateProperty:
         mock_result.owner_id = test_user.id
         mock_result.property_type = PropertyType.apartment
 
-        with patch("app.services.property.PropertyRepository") as mock_repo_class:
+        with patch("app.services.property.crud.PropertyRepository") as mock_repo_class:
             mock_repo = MagicMock()
             mock_property = MagicMock()
             mock_repo.create = AsyncMock(return_value=mock_property)
             mock_repo_class.return_value = mock_repo
 
-            with patch("app.services.property.PropertyCacheManager.invalidate_property_caches", new_callable=AsyncMock):
-                with patch("app.services.property.PropertySchema.model_validate", return_value=mock_result):
+            with patch("app.services.property.crud.PropertyCacheManager.invalidate_property_caches", new_callable=AsyncMock):
+                with patch("app.services.property.crud.PropertySchema.model_validate", return_value=mock_result):
                     result = await create_property(db_session, property_data, test_user.id, test_user)
 
                     assert result is not None
@@ -138,7 +138,7 @@ class TestUpdateProperty:
         mock_result.id = test_property.id
         mock_result.title = "Updated Title"
 
-        with patch("app.services.property.PropertyRepository") as mock_repo_class:
+        with patch("app.services.property.crud.PropertyRepository") as mock_repo_class:
             mock_repo = MagicMock()
             mock_property = MagicMock()
             mock_property.owner_id = test_user.id
@@ -149,8 +149,8 @@ class TestUpdateProperty:
             # Mock the db session operations
             with patch.object(db_session, "flush", new_callable=AsyncMock):
                 with patch.object(db_session, "refresh", new_callable=AsyncMock):
-                    with patch("app.services.property.PropertyCacheManager.invalidate_property_caches", new_callable=AsyncMock):
-                        with patch("app.services.property.PropertySchema.model_validate", return_value=mock_result):
+                    with patch("app.services.property.crud.PropertyCacheManager.invalidate_property_caches", new_callable=AsyncMock):
+                        with patch("app.services.property.crud.PropertySchema.model_validate", return_value=mock_result):
                             result = await update_property(
                                 db_session, test_property.id, update_data, test_user
                             )
@@ -214,7 +214,7 @@ class TestDeleteProperty:
         property_id = test_property.id
 
         # Mock the cache invalidation to avoid MagicMock await issues
-        with patch("app.services.property.PropertyCacheManager.invalidate_property_caches", new_callable=AsyncMock):
+        with patch("app.services.property.crud.PropertyCacheManager.invalidate_property_caches", new_callable=AsyncMock):
             result = await delete_property(db_session, property_id, test_user)
 
         assert result is True

@@ -131,16 +131,8 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
         await connection.close()
 
 
-@pytest_asyncio.fixture(scope="function")
-async def db(db_session) -> AsyncSession:
-    """Alias for db_session for convenience."""
-    return db_session
-
-
-@pytest_asyncio.fixture(scope="function")
-async def test_db(db_session) -> AsyncSession:
-    """Alias for db_session for convenience."""
-    return db_session
+# NOTE: Removed legacy aliases `db` and `test_db` — use `db_session` directly.
+# If you see NameError for `db` or `test_db`, replace with `db_session`.
 
 
 # =============================================================================
@@ -222,4 +214,5 @@ pytest_plugins = [
     "tests.fixtures.factories",
     "tests.fixtures.mocks",
     "tests.fixtures.data",
+    "tests.fixtures.common",
 ]

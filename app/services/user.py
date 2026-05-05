@@ -18,53 +18,53 @@ async def get_user_by_phone(db: AsyncSession, phone: str) -> Optional[User]:
     Note: Phone numbers are not unique in the schema; this returns the first match
     if multiple exist. For existence checks, this is sufficient.
     """
-    logger.debug(f"Fetching user by phone: {phone}")
+    logger.debug("Fetching user by phone: %s", phone)
     try:
         stmt = select(User).where(User.phone == phone)
         result = await db.execute(stmt)
         user = result.scalar_one_or_none()
         if user:
-            logger.debug(f"User found with ID {user.id} for phone {phone}")
+            logger.debug("User found with ID %s for phone %s", user.id, phone)
         else:
-            logger.debug(f"No user found with phone {phone}")
+            logger.debug("No user found with phone %s", phone)
         return user
     except Exception as e:
-        logger.error(f"Failed to fetch user by phone {phone}: {str(e)}", exc_info=True)
+        logger.error("Failed to fetch user by phone %s: %s", phone, e, exc_info=True)
         raise
 
 async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
-    logger.debug(f"Fetching user by email: {email}")
+    logger.debug("Fetching user by email: %s", email)
     try:
         stmt = select(User).where(User.email == email)
         result = await db.execute(stmt)
         user = result.scalar_one_or_none()
         if user:
-            logger.debug(f"User found with ID {user.id}")
+            logger.debug("User found with ID %s", user.id)
         else:
-            logger.debug(f"No user found with email {email}")
+            logger.debug("No user found with email %s", email)
         return user
     except Exception as e:
-        logger.error(f"Failed to fetch user by email {email}: {str(e)}", exc_info=True)
+        logger.error("Failed to fetch user by email %s: %s", email, e, exc_info=True)
         raise
 
 async def get_user_by_supabase_id(db: AsyncSession, supabase_user_id: str) -> Optional[User]:
-    logger.debug(f"Fetching user by Supabase ID: {supabase_user_id}")
+    logger.debug("Fetching user by Supabase ID: %s", supabase_user_id)
     try:
         stmt = select(User).where(User.supabase_user_id == supabase_user_id)
         result = await db.execute(stmt)
         user = result.scalar_one_or_none()
         if user:
-            logger.debug(f"User found with ID {user.id}")
+            logger.debug("User found with ID %s", user.id)
         else:
-            logger.debug(f"No user found with Supabase ID {supabase_user_id}")
+            logger.debug("No user found with Supabase ID %s", supabase_user_id)
         return user
     except Exception as e:
-        logger.error(f"Failed to fetch user by Supabase ID {supabase_user_id}: {str(e)}", exc_info=True)
+        logger.error("Failed to fetch user by Supabase ID %s: %s", supabase_user_id, e, exc_info=True)
         raise
 
 async def get_or_create_user_from_supabase(db: AsyncSession, supabase_user_data: Dict[str, Any]) -> User:
     """Get or create user from Supabase auth data"""
-    logger.info(f"Getting or creating user from Supabase data for user {supabase_user_data['id']}")
+    logger.info("Getting or creating user from Supabase data for user %s", supabase_user_data['id'])
     
     try:
         # Normalize incoming fields
@@ -88,7 +88,7 @@ async def get_or_create_user_from_supabase(db: AsyncSession, supabase_user_data:
             
             if user:
                 # Update with Supabase ID
-                logger.info(f"Updating existing user {user.id} with Supabase ID")
+                logger.info("Updating existing user %s with Supabase ID", user.id)
                 user.supabase_user_id = supabase_id
                 # Optionally backfill missing phone/full_name
                 if phone and not user.phone:
@@ -97,10 +97,7 @@ async def get_or_create_user_from_supabase(db: AsyncSession, supabase_user_data:
                     user.full_name = full_name
             else:
                 # Create new user
-                logger.info(
-                    f"Creating new user from Supabase data: "
-                    f"phone={'present' if phone else 'none'} email={'present' if email else 'none'}"
-                )
+                logger.info("Creating new user from Supabase data: phone=%s email=%s", 'present' if phone else 'none', 'present' if email else 'none')
                 user = User(
                     supabase_user_id=supabase_id,
                     email=email,
@@ -126,13 +123,13 @@ async def get_or_create_user_from_supabase(db: AsyncSession, supabase_user_data:
                     raise
             else:
                 await db.refresh(user)
-                logger.info(f"User {'updated' if user.supabase_user_id else 'created'} with ID {user.id}")
+                logger.info("User %s with ID %s", 'updated' if user.supabase_user_id else 'created', user.id)
         else:
-            logger.debug(f"User already exists with ID {user.id}")
+            logger.debug("User already exists with ID %s", user.id)
         
         return user
     except Exception as e:
-        logger.error(f"Failed to get or create user from Supabase: {str(e)}", exc_info=True)
+        logger.error("Failed to get or create user from Supabase: %s", e, exc_info=True)
         raise
 
 async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[User]:
@@ -142,7 +139,7 @@ async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[User]:
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
     except Exception as e:
-        logger.error(f"Failed to fetch user by id {user_id}: {e}")
+        logger.error("Failed to fetch user by id %s: %s", user_id, e)
         raise
 
 async def get_all_users(
@@ -176,21 +173,21 @@ async def get_all_users(
         total = count_result.scalar_one()
         return users, total
     except Exception as e:
-        logger.error(f"Failed to list users: {e}")
+        logger.error("Failed to list users: %s", e)
         raise
 
 async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, actor: Optional[User] = None) -> Optional[User]:
-    logger.info(f"Updating user {user_id}")
+    logger.info("Updating user %s", user_id)
     
     try:
         user = await get_user_by_id(db, user_id)
         
         if not user:
-            logger.warning(f"User {user_id} not found for update")
+            logger.warning("User %s not found for update", user_id)
             return None
         
         update_data = user_update.model_dump(exclude_unset=True)
-        logger.debug(f"Updating user {user_id} with fields: {list(update_data.keys())}")
+        logger.debug("Updating user %s with fields: %s", user_id, list(update_data.keys()))
 
         # RBAC: if an actor is provided and actor is an agent updating other users,
         # restrict to safe fields only
@@ -203,7 +200,7 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, a
                 'preferences', 'notification_settings', 'privacy_settings'
             }
             update_data = {k: v for k, v in update_data.items() if k in allowed_fields}
-            logger.debug(f"Agent update filtered fields: {list(update_data.keys())}")
+            logger.debug("Agent update filtered fields: %s", list(update_data.keys()))
         # Admins can update any fields; end-users can update their own profile via API
         
         # Handle email update (no uniqueness validation needed since emails are now non-unique)
@@ -212,7 +209,7 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, a
             
             # Skip update if email is the same as current
             if new_email == user.email:
-                logger.debug(f"Email unchanged for user {user_id}, skipping email update")
+                logger.debug("Email unchanged for user %s, skipping email update", user_id)
                 del update_data['email']
         
         # Apply updates
@@ -221,21 +218,21 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, a
         
         await db.flush()
         await db.refresh(user)
-        logger.info(f"User {user_id} updated successfully")
+        logger.info("User %s updated successfully", user_id)
         
         return user
     except BaseAPIException:
         # Re-raise custom API exceptions as-is
         raise
     except IntegrityError as e:
-        logger.error(f"Integrity error updating user {user_id}: {str(e)}")
+        logger.error("Integrity error updating user %s: %s", user_id, e)
         raise BadRequestException(detail="Data integrity constraint violated")
     except Exception as e:
-        logger.error(f"Failed to update user {user_id}: {str(e)}", exc_info=True)
+        logger.error("Failed to update user %s: %s", user_id, e, exc_info=True)
         raise BaseAPIException(detail="Internal server error occurred while updating user")
 
 async def update_user_preferences(db: AsyncSession, user_id: int, preferences: dict) -> Optional[User]:
-    logger.info(f"Updating preferences for user {user_id}")
+    logger.info("Updating preferences for user %s", user_id)
     
     try:
         user = await db.get(User, user_id)
@@ -245,16 +242,16 @@ async def update_user_preferences(db: AsyncSession, user_id: int, preferences: d
             user.preferences = {**current_preferences, **incoming_preferences}
             await db.flush()
             await db.refresh(user)
-            logger.info(f"Preferences updated for user {user_id}")
+            logger.info("Preferences updated for user %s", user_id)
         else:
-            logger.warning(f"User {user_id} not found for preferences update")
+            logger.warning("User %s not found for preferences update", user_id)
         return user
     except Exception as e:
-        logger.error(f"Failed to update preferences for user {user_id}: {str(e)}", exc_info=True)
+        logger.error("Failed to update preferences for user %s: %s", user_id, e, exc_info=True)
         raise
 
 async def update_user_location(db: AsyncSession, user_id: int, latitude: float, longitude: float) -> Optional[User]:
-    logger.info(f"Updating location for user {user_id}: ({latitude}, {longitude})")
+    logger.info("Updating location for user %s: (%s, %s)", user_id, latitude, longitude)
     
     try:
         user = await db.get(User, user_id)
@@ -263,12 +260,12 @@ async def update_user_location(db: AsyncSession, user_id: int, latitude: float, 
             user.current_longitude = longitude
             await db.flush()
             await db.refresh(user)
-            logger.info(f"Location updated for user {user_id}")
+            logger.info("Location updated for user %s", user_id)
         else:
-            logger.warning(f"User {user_id} not found for location update")
+            logger.warning("User %s not found for location update", user_id)
         return user
     except Exception as e:
-        logger.error(f"Failed to update location for user {user_id}: {str(e)}", exc_info=True)
+        logger.error("Failed to update location for user %s: %s", user_id, e, exc_info=True)
         raise
 
 
@@ -277,22 +274,19 @@ async def update_user_notification_settings(
     user_id: int,
     settings: dict,
 ) -> Optional[User]:
-    logger.info(f"Updating notification settings for user {user_id}")
+    logger.info("Updating notification settings for user %s", user_id)
     try:
         user = await db.get(User, user_id)
         if user:
             user.notification_settings = settings
             await db.flush()
             await db.refresh(user)
-            logger.info(f"Notification settings updated for user {user_id}")
+            logger.info("Notification settings updated for user %s", user_id)
         else:
-            logger.warning(f"User {user_id} not found for notification settings update")
+            logger.warning("User %s not found for notification settings update", user_id)
         return user
     except Exception as e:
-        logger.error(
-            f"Failed to update notification settings for user {user_id}: {str(e)}",
-            exc_info=True,
-        )
+        logger.error("Failed to update notification settings for user %s: %s", user_id, e, exc_info=True,)
         raise
 
 
@@ -301,20 +295,17 @@ async def update_user_privacy_settings(
     user_id: int,
     settings: dict,
 ) -> Optional[User]:
-    logger.info(f"Updating privacy settings for user {user_id}")
+    logger.info("Updating privacy settings for user %s", user_id)
     try:
         user = await db.get(User, user_id)
         if user:
             user.privacy_settings = settings
             await db.flush()
             await db.refresh(user)
-            logger.info(f"Privacy settings updated for user {user_id}")
+            logger.info("Privacy settings updated for user %s", user_id)
         else:
-            logger.warning(f"User {user_id} not found for privacy settings update")
+            logger.warning("User %s not found for privacy settings update", user_id)
         return user
     except Exception as e:
-        logger.error(
-            f"Failed to update privacy settings for user {user_id}: {str(e)}",
-            exc_info=True,
-        )
+        logger.error("Failed to update privacy settings for user %s: %s", user_id, e, exc_info=True,)
         raise

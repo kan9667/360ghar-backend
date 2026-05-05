@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.models.enums import (
     ListingGenderPreference,
@@ -253,6 +254,39 @@ class TestListProperties:
             assert filters.property_type == [PropertyType.flatmate]
             assert filters.gender_preference == ListingGenderPreference.female
             assert filters.sharing_type == ListingSharingType.shared_room
+
+    @pytest.mark.asyncio
+    async def test_list_properties_returns_503_for_transient_db_error(self, client: AsyncClient):
+        """Transient DB failures should map to 503."""
+        with patch(
+            "app.api.api_v1.endpoints.properties.get_unified_properties_optimized",
+            new_callable=AsyncMock,
+        ) as mock_list:
+            mock_list.side_effect = SQLAlchemyError(
+                "(ECHECKOUTTIMEOUT) unable to check out connection from the pool"
+            )
+
+            response = await client.get("/api/v1/properties/")
+
+            assert response.status_code == 503
+
+
+class TestRecommendations:
+    @pytest.mark.asyncio
+    async def test_recommendations_returns_503_for_transient_db_error(
+        self, client: AsyncClient
+    ):
+        with patch(
+            "app.api.api_v1.endpoints.properties.get_property_recommendations",
+            new_callable=AsyncMock,
+        ) as mock_reco:
+            mock_reco.side_effect = SQLAlchemyError(
+                "(EDBHANDLEREXITED) connection to database closed"
+            )
+
+            response = await client.get("/api/v1/properties/recommendations")
+
+            assert response.status_code == 503
 
 
 class TestGetProperty:

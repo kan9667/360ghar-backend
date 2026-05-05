@@ -30,12 +30,12 @@ logger = get_logger(__name__)
 # Required MIME type for MCP App widget resources (per Apps SDK spec).
 RESOURCE_MIME_TYPE = "text/html;profile=mcp-app"
 
-MCP_SECURITY_SCHEMES_MIXED: list[dict[str, Any]] = [
+MCP_SECURITY_SCHEMES_MIXED: list[dict[str, str | list[str]]] = [
     {"type": "noauth"},
     {"type": "oauth2", "scopes": ["mcp:read", "mcp:write"]},
 ]
 
-MCP_SECURITY_SCHEMES_OAUTH2_ONLY: list[dict[str, Any]] = [
+MCP_SECURITY_SCHEMES_OAUTH2_ONLY: list[dict[str, str | list[str]]] = [
     {"type": "oauth2", "scopes": ["mcp:read", "mcp:write"]},
 ]
 

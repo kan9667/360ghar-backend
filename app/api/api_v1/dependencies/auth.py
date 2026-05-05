@@ -143,7 +143,7 @@ async def get_current_agent(
     current_user: UserSchema = Depends(get_current_active_user),
 ) -> UserSchema:
     """Ensure the current user has agent role."""
-    if getattr(current_user, "role", None) != UserRole.agent.value:
+    if getattr(current_user, "role", None) != UserRole.agent:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -158,7 +158,7 @@ async def get_current_admin(
     current_user: UserSchema = Depends(get_current_active_user),
 ) -> UserSchema:
     """Ensure the current user has admin role."""
-    if getattr(current_user, "role", None) != UserRole.admin.value:
+    if getattr(current_user, "role", None) != UserRole.admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={

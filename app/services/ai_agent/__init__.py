@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from app.services.ai_agent.agent_service import PydanticAIAgentService
-from app.services.ai_agent.tool_bridge import AgentDeps
+from app.services.ai_agent.tools import AgentDeps
 
 __all__ = ["PydanticAIAgentService", "AgentDeps", "get_agent_service"]
 

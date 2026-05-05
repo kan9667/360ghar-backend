@@ -111,7 +111,7 @@ async def create_bug_report_with_media(
             media_urls.append(upload_result["public_url"])
         except Exception as e:
             # Log error but continue with other files
-            logger.error(f"Failed to upload file {file.filename}: {str(e)}")
+            logger.error("Failed to upload file %s: %s", file.filename, e)
             continue
 
     # Create bug report data

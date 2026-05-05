@@ -27,7 +27,7 @@ async def swipe_property(
     
     if not success:
         # Property doesn't exist, but we return success to avoid client errors
-        logger.warning(f"Attempted to swipe non-existent property {swipe.property_id} by user {current_user.id}")
+        logger.warning("Attempted to swipe non-existent property %s by user %s", swipe.property_id, current_user.id)
         return MessageResponse(message=f"Property {action} successfully")
     
     logger.debug("Property swipe recorded", extra={"user_id": current_user.id, "property_id": swipe.property_id, "action": action})
@@ -133,12 +133,12 @@ async def get_user_swipe_history(
     )
 
     # Log search request
-    logger.info(f"Swipe history search request - user: {current_user.id}, filters: {len([f for f in [q, lat, lng, property_type, city] if f])}, page: {page}")
+    logger.info("Swipe history search request - user: %s, filters: %s, page: %s", current_user.id, len([f for f in [q, lat, lng, property_type, city] if f]), page)
 
     try:
         result = await get_swipe_history(db, current_user.id, filters, page, limit, is_liked)
 
-        logger.info(f"Swipe history search completed - found {result.get('total', 0)} properties, returning page {page}")
+        logger.info("Swipe history search completed - found %s properties, returning page %s", result.get('total', 0), page)
 
         # Extract properties from swipe objects and ensure they have the liked attribute
         swipes = result.get("items", [])
@@ -160,7 +160,7 @@ async def get_user_swipe_history(
             "search_center": ({"latitude": lat, "longitude": lng} if lat is not None and lng is not None else None)
         }
     except Exception as e:
-        logger.error(f"Swipe history search failed for user {current_user.id}: {str(e)}")
+        logger.error("Swipe history search failed for user %s: %s", current_user.id, e)
         raise
 
 @router.delete("/undo", response_model=MessageResponse)

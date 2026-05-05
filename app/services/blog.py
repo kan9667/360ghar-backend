@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.orm import selectinload
 from typing import Optional, List, Tuple
+from app.core.db_resilience import execute_with_transient_retry
 from app.core.logging import get_logger
 from app.core.exceptions import (
     ForbiddenException, NotFoundException, ConflictException,
@@ -180,8 +181,14 @@ async def list_blog_posts(
     if categories:
         idents = [s.strip() for s in categories if s and s.strip()]
         if idents:
-            cats_res = await db.execute(
-                select(BlogCategory.id).where(or_(BlogCategory.slug.in_(idents), BlogCategory.name.in_(idents)))
+            cats_res = await execute_with_transient_retry(
+                db,
+                lambda: db.execute(
+                    select(BlogCategory.id).where(
+                        or_(BlogCategory.slug.in_(idents), BlogCategory.name.in_(idents))
+                    )
+                ),
+                operation_name="blog_posts_category_lookup",
             )
             cat_ids = [row[0] for row in cats_res.fetchall()]
             if cat_ids:
@@ -192,8 +199,12 @@ async def list_blog_posts(
     if tags:
         idents = [s.strip() for s in tags if s and s.strip()]
         if idents:
-            tags_res = await db.execute(
-                select(BlogTag.id).where(or_(BlogTag.slug.in_(idents), BlogTag.name.in_(idents)))
+            tags_res = await execute_with_transient_retry(
+                db,
+                lambda: db.execute(
+                    select(BlogTag.id).where(or_(BlogTag.slug.in_(idents), BlogTag.name.in_(idents)))
+                ),
+                operation_name="blog_posts_tag_lookup",
             )
             tag_ids = [row[0] for row in tags_res.fetchall()]
             if tag_ids:
@@ -206,10 +217,20 @@ async def list_blog_posts(
 
     query = query.order_by(BlogPost.created_at.desc()).offset((page - 1) * limit).limit(limit)
 
-    result = await db.execute(query)
+    result = await execute_with_transient_retry(
+        db,
+        lambda: db.execute(query),
+        operation_name="blog_posts_query",
+    )
     items = result.scalars().all()
 
-    total = (await db.execute(count_query)).scalar() or 0
+    total = (
+        await execute_with_transient_retry(
+            db,
+            lambda: db.execute(count_query),
+            operation_name="blog_posts_count",
+        )
+    ).scalar() or 0
 
     return [BlogPostSchema.model_validate(i) for i in items], int(total)
 

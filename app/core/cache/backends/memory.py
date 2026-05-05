@@ -126,7 +126,7 @@ class InMemoryCacheBackend:
                 while len(self._cache) >= self._max_size:
                     # popitem(last=False) removes oldest (least recently used)
                     evicted_key, _ = self._cache.popitem(last=False)
-                    logger.debug(f"LRU eviction: {evicted_key}")
+                    logger.debug("LRU eviction: %s", evicted_key)
 
                 self._cache[key] = CacheEntry(
                     value=value,
@@ -137,9 +137,30 @@ class InMemoryCacheBackend:
             self.stats.sets += 1
             return True
         except Exception as e:
-            logger.error(f"In-memory cache set error: {e}")
+            logger.error("In-memory cache set error: %s", e)
             self.stats.errors += 1
             return False
+
+    async def get_and_delete(self, key: str) -> Optional[Any]:
+        """Atomically get value and delete key under the same lock.
+
+        Prevents TOCTOU races where two concurrent callers both read
+        the value before either deletes it.
+        """
+        async with self._lock:
+            entry = self._cache.get(key)
+            if entry is None:
+                self.stats.misses += 1
+                return None
+            if entry.is_expired():
+                del self._cache[key]
+                self.stats.misses += 1
+                return None
+            value = entry.value
+            del self._cache[key]
+            self.stats.hits += 1
+            self.stats.deletes += 1
+            return value
 
     async def delete(self, key: str) -> bool:
         """Delete single key."""
@@ -164,7 +185,7 @@ class InMemoryCacheBackend:
 
         self.stats.deletes += deleted
         if deleted > 0:
-            logger.debug(f"Pattern delete '{pattern}': {deleted} keys removed")
+            logger.debug("Pattern delete '%s': %s keys removed", pattern, deleted)
         return deleted
 
     async def exists(self, key: str) -> bool:
@@ -183,7 +204,7 @@ class InMemoryCacheBackend:
         async with self._lock:
             count = len(self._cache)
             self._cache.clear()
-        logger.info(f"In-memory cache cleared: {count} entries")
+        logger.info("In-memory cache cleared: %s entries", count)
         return True
 
     async def _periodic_cleanup(self) -> None:
@@ -195,7 +216,7 @@ class InMemoryCacheBackend:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Cleanup task error: {e}")
+                logger.error("Cleanup task error: %s", e)
 
     async def _cleanup_expired(self) -> None:
         """Remove all expired entries."""
@@ -205,7 +226,7 @@ class InMemoryCacheBackend:
                 del self._cache[key]
 
         if expired_keys:
-            logger.debug(f"Cleaned up {len(expired_keys)} expired entries")
+            logger.debug("Cleaned up %s expired entries", len(expired_keys))
 
     def get_size(self) -> int:
         """Current number of entries (approximate, not locked)."""

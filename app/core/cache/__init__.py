@@ -57,6 +57,13 @@ def set_cache_manager(manager: Optional[CacheManager]) -> None:
     _cache_manager = manager
 
 
+def reset_cache_manager() -> None:
+    """Reset the global cache manager. For use in test teardown."""
+    global _cache_manager
+    if _cache_manager is not None:
+        _cache_manager = None
+
+
 async def initialize_cache() -> None:
     """Initialize cache connections. Call during app startup."""
     await get_cache_manager().connect()
@@ -130,6 +137,7 @@ __all__ = [
     "cache_manager",
     "get_cache_manager",
     "set_cache_manager",
+    "reset_cache_manager",
     "initialize_cache",
     "shutdown_cache",
     # Property-specific

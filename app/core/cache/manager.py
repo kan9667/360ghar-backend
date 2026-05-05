@@ -33,8 +33,13 @@ class NullCacheBackend:
         return None
 
     async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
-        """Always returns True (pretend success)."""
+        """Always returns True (pretend success), but logs a warning."""
+        logger.warning("NullCacheBackend: discarding write for key '%s' — cache is disabled", key)
         return True
+
+    async def get_and_delete(self, key: str) -> None:
+        """Always returns None (no-op)."""
+        return None
 
     async def delete(self, key: str) -> bool:
         """Always returns True."""
@@ -144,32 +149,40 @@ class CacheManager:
                 logger.warning("Primary cache not available, using fallback")
                 self._use_fallback = True
         except Exception as e:
-            logger.warning(f"Primary cache connection failed: {e}")
+            logger.warning("Primary cache connection failed: %s", e)
             self._use_fallback = True
 
         if self._fallback and not isinstance(self._fallback, NullCacheBackend):
             try:
                 await self._fallback.connect()
             except Exception as e:
-                logger.warning(f"Fallback cache connection failed: {e}")
+                logger.warning("Fallback cache connection failed: %s", e)
 
     async def disconnect(self) -> None:
         """Close all cache connections."""
         try:
             await self._primary.disconnect()
         except Exception as e:
-            logger.warning(f"Primary cache disconnect error: {e}")
+            logger.warning("Primary cache disconnect error: %s", e)
 
         if self._fallback and not isinstance(self._fallback, NullCacheBackend):
             try:
                 await self._fallback.disconnect()
             except Exception as e:
-                logger.warning(f"Fallback cache disconnect error: {e}")
+                logger.warning("Fallback cache disconnect error: %s", e)
 
     # Delegate all operations to active backend
     async def get(self, key: str) -> Optional[Any]:
         """Get value from cache."""
         return await self.backend.get(key)
+
+    async def get_and_delete(self, key: str) -> Optional[Any]:
+        """Atomically get value and delete key from cache.
+
+        Prevents TOCTOU races where a value is read and then deleted
+        in separate non-atomic steps (e.g., auth code exchange).
+        """
+        return await self.backend.get_and_delete(key)
 
     async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
         """Set value in cache."""

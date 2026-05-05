@@ -11,6 +11,19 @@ from app.models.enums import (
     BookingStatus,
     PaymentStatus,
     VisitStatus,
+    ListingGenderPreference,
+    ListingSharingType,
+    FlatmatesMode,
+    FlatmatesProfileStatus,
+    SwipeTargetType,
+    SwipeAction,
+    VisitContext,
+    ConversationSource,
+    ConversationStatus,
+    UserMatchStatus,
+    MessageType,
+    UserReportReason,
+    UserReportStatus,
     AgentType,
     ExperienceLevel,
     BugType,
@@ -30,6 +43,13 @@ from app.models.enums import (
     WorkOrderStatus,
     DocumentType,
     InspectionType,
+    TourStatus,
+    TourVisibility,
+    HotspotType,
+    ScraperStatus,
+    AuctionSource,
+    GazetteType,
+    ComplaintNature,
 )
 
 
@@ -357,3 +377,109 @@ class TestEnumStringBehavior:
         data = {PropertyType.house: "House", PropertyType.apartment: "Apartment"}
         assert data["house"] == "House"
         assert data[PropertyType.apartment] == "Apartment"
+
+
+class TestListingPreferenceEnums:
+    """Tests for listing preference enums (PG/flatmate)."""
+
+    def test_gender_preference_values(self):
+        assert ListingGenderPreference.any.value == "any"
+        assert ListingGenderPreference.male.value == "male"
+        assert ListingGenderPreference.female.value == "female"
+
+    def test_sharing_type_values(self):
+        assert ListingSharingType.private_room.value == "private_room"
+        assert ListingSharingType.shared_room.value == "shared_room"
+
+
+class TestFlatmatesEnums:
+    """Tests for flatmates-related enums."""
+
+    def test_flatmates_mode_values(self):
+        assert FlatmatesMode.room_poster.value == "room_poster"
+        assert FlatmatesMode.seeker.value == "seeker"
+        assert FlatmatesMode.co_hunter.value == "co_hunter"
+        assert FlatmatesMode.open_to_both.value == "open_to_both"
+
+    def test_flatmates_profile_status_values(self):
+        assert FlatmatesProfileStatus.draft.value == "draft"
+        assert FlatmatesProfileStatus.active.value == "active"
+        assert FlatmatesProfileStatus.paused.value == "paused"
+
+    def test_swipe_target_type(self):
+        assert SwipeTargetType.property.value == "property"
+        assert SwipeTargetType.user.value == "user"
+
+    def test_swipe_action_values(self):
+        assert SwipeAction.pass_.value == "pass"
+        assert SwipeAction.like.value == "like"
+        assert SwipeAction.super_like.value == "super_like"
+
+    def test_visit_context_values(self):
+        assert VisitContext.property_tour.value == "property_tour"
+        assert VisitContext.flatmate_meet.value == "flatmate_meet"
+
+    def test_conversation_source_values(self):
+        assert ConversationSource.listing_interest.value == "listing_interest"
+        assert ConversationSource.profile_match.value == "profile_match"
+
+    def test_conversation_status_values(self):
+        for status in ["active", "archived", "blocked", "closed"]:
+            assert hasattr(ConversationStatus, status)
+
+    def test_user_match_status_values(self):
+        for status in ["active", "unmatched", "blocked"]:
+            assert hasattr(UserMatchStatus, status)
+
+    def test_message_type_values(self):
+        assert MessageType.text.value == "text"
+        assert MessageType.image.value == "image"
+        assert MessageType.system.value == "system"
+
+    def test_user_report_reason_values(self):
+        for reason in ["spam", "fake_profile", "abuse", "inappropriate", "other"]:
+            assert hasattr(UserReportReason, reason)
+
+    def test_user_report_status_values(self):
+        for status in ["open", "reviewed", "dismissed", "actioned"]:
+            assert hasattr(UserReportStatus, status)
+
+
+class TestTourEnums:
+    """Tests for tour-related enums."""
+
+    def test_tour_status_values(self):
+        assert TourStatus.draft.value == "draft"
+        assert TourStatus.published.value == "published"
+        assert TourStatus.archived.value == "archived"
+
+    def test_tour_visibility_values(self):
+        assert TourVisibility.private.value == "private"
+        assert TourVisibility.unlisted.value == "unlisted"
+        assert TourVisibility.public.value == "public"
+
+    def test_hotspot_type_values(self):
+        for ht in ["navigation", "info", "audio", "video", "link", "custom"]:
+            assert hasattr(HotspotType, ht)
+
+
+class TestDataHubEnums:
+    """Tests for data hub enums."""
+
+    def test_scraper_status_values(self):
+        assert ScraperStatus.running.value == "running"
+        assert ScraperStatus.success.value == "success"
+        assert ScraperStatus.partial.value == "partial"
+        assert ScraperStatus.failed.value == "failed"
+
+    def test_auction_source_values(self):
+        for src in ["sarfaesi", "ibapi", "mstc", "drt", "ecourts"]:
+            assert hasattr(AuctionSource, src)
+
+    def test_gazette_type_values(self):
+        for gt in ["land_acquisition", "rate_revision", "policy", "clu_change"]:
+            assert hasattr(GazetteType, gt)
+
+    def test_complaint_nature_values(self):
+        for cn in ["delay", "quality", "refund", "compensation", "other"]:
+            assert hasattr(ComplaintNature, cn)

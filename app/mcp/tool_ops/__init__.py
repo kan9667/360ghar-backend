@@ -3,8 +3,8 @@ Shared tool operation implementations for MCP servers and the AI agent tool brid
 
 These functions contain the business logic (service calls, DB queries, serialization)
 that is shared across:
-- ``app/mcp/user_server.py`` (User MCP server at /mcp)
-- ``app/mcp/admin_server.py`` (Admin MCP server at /mcp-admin)
+- ``app/mcp/user/`` (User MCP server package at /mcp)
+- ``app/mcp/admin/`` (Admin MCP server package at /mcp-admin)
 - ``app/services/ai_agent/tool_bridge.py`` (Pydantic AI agent)
 
 Each function takes a ``db: AsyncSession`` and domain-specific parameters,

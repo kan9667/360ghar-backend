@@ -104,6 +104,8 @@ class TestRateLimitIntegration:
         with patch("app.middleware.rate_limit.get_cache_manager") as mock_cache:
             mock_manager = AsyncMock()
             mock_manager.is_available.return_value = False
+            # Counter-based rate limiter expects integer counts from cache.get
+            mock_manager.get.return_value = 0
             mock_cache.return_value = mock_manager
 
             transport = ASGITransport(app=app)
@@ -151,25 +153,17 @@ class TestRateLimitIntegration:
         app.add_middleware(RateLimitMiddleware, calls=2, period=60)
 
         with patch("app.middleware.rate_limit.get_cache_manager") as mock_cache:
-            call_count = 0
-
-            async def mock_check(*args, **kwargs):
-                nonlocal call_count
-                call_count += 1
-                # Allow first 2 calls, block after
-                return call_count <= 2
-
             mock_manager = AsyncMock()
             mock_manager.is_available.return_value = True
-            mock_manager.get.return_value = list(range(call_count))
+            # Simulate that cache already has 2 requests in the current window
+            mock_manager.get.return_value = 2
             mock_cache.return_value = mock_manager
 
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
-                # First calls should succeed (within mocked limit)
-                response1 = await client.get("/limited")
-                # Response depends on cache mock behavior
-                assert response1.status_code in [200, 429]
+                response = await client.get("/limited")
+                # Should be rate limited since current_count (2) >= calls (2)
+                assert response.status_code == 429
 
 
 class TestRateLimitScopes:

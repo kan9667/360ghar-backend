@@ -111,7 +111,7 @@ async def generate_tour(
         if url:
             image_urls.append(url)
         else:
-            logger.warning(f"Upload result missing URL: {result}")
+            logger.warning("Upload result missing URL: %s", result)
 
     if not image_urls:
         raise HTTPException(status_code=500, detail="Failed to upload images")

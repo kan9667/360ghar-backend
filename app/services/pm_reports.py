@@ -123,7 +123,7 @@ async def occupancy_report(
     *,
     actor: User,
     owner_id: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> Dict[str, int]:
     owner_ids = await _resolve_owner_scope(db, actor=actor, owner_id=owner_id)
 
     total_stmt = select(func.count(Property.id)).where(Property.is_managed == True)
@@ -147,7 +147,7 @@ async def maintenance_report(
     *,
     actor: User,
     owner_id: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> Dict[str, int]:
     owner_ids = await _resolve_owner_scope(db, actor=actor, owner_id=owner_id)
     stmt = select(func.count(MaintenanceRequest.id))
     if owner_ids is not None:

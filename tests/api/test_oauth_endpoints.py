@@ -29,7 +29,7 @@ class TestOAuthAuthorizeEndpoint:
     async def test_authorize_success(self, client: AsyncClient):
         """Test OAuth authorize redirect with PKCE."""
         with patch(
-            "app.api.api_v1.endpoints.oauth.oauth_token_store"
+            "app.api.api_v1.endpoints.oauth.authorization.oauth_token_store"
         ) as mock_store:
             mock_store.store_oauth_session = AsyncMock()
 
@@ -129,7 +129,7 @@ class TestOAuthTokenEndpoint:
         verifier, challenge = generate_pkce_pair()
 
         with patch(
-            "app.api.api_v1.endpoints.oauth.oauth_token_store"
+            "app.api.api_v1.endpoints.oauth.token.oauth_token_store"
         ) as mock_store:
             mock_store.get_auth_code = AsyncMock(
                 return_value={
@@ -178,7 +178,7 @@ class TestOAuthTokenEndpoint:
     async def test_token_invalid_code(self, client: AsyncClient):
         """Test token exchange with invalid authorization code."""
         with patch(
-            "app.api.api_v1.endpoints.oauth.oauth_token_store"
+            "app.api.api_v1.endpoints.oauth.token.oauth_token_store"
         ) as mock_store:
             mock_store.get_auth_code = AsyncMock(return_value=None)
 
@@ -197,7 +197,7 @@ class TestOAuthTokenEndpoint:
     async def test_token_refresh_grant(self, client: AsyncClient):
         """Test token refresh."""
         with patch(
-            "app.api.api_v1.endpoints.oauth.oauth_token_store"
+            "app.api.api_v1.endpoints.oauth.token.oauth_token_store"
         ) as mock_store:
             mock_store.get_refresh_token = AsyncMock(
                 return_value={
@@ -227,7 +227,7 @@ class TestOAuthTokenEndpoint:
     async def test_token_invalid_refresh_token(self, client: AsyncClient):
         """Test token refresh with invalid refresh token."""
         with patch(
-            "app.api.api_v1.endpoints.oauth.oauth_token_store"
+            "app.api.api_v1.endpoints.oauth.token.oauth_token_store"
         ) as mock_store:
             mock_store.get_refresh_token = AsyncMock(return_value=None)
 
@@ -245,7 +245,7 @@ class TestOAuthTokenEndpoint:
     async def test_token_refresh_missing_client_id_for_bound_token(self, client: AsyncClient):
         """Refresh token bound to a client_id must include client_id in request."""
         with patch(
-            "app.api.api_v1.endpoints.oauth.oauth_token_store"
+            "app.api.api_v1.endpoints.oauth.token.oauth_token_store"
         ) as mock_store:
             mock_store.get_refresh_token = AsyncMock(
                 return_value={
@@ -272,7 +272,7 @@ class TestOAuthTokenEndpoint:
     async def test_token_refresh_invalid_client_id_for_bound_token(self, client: AsyncClient):
         """Refresh token should reject mismatched client_id."""
         with patch(
-            "app.api.api_v1.endpoints.oauth.oauth_token_store"
+            "app.api.api_v1.endpoints.oauth.token.oauth_token_store"
         ) as mock_store:
             mock_store.get_refresh_token = AsyncMock(
                 return_value={
@@ -316,7 +316,7 @@ class TestOAuthConsentEndpoint:
     async def test_consent_page_missing_session(self, client: AsyncClient):
         """Test consent page without session."""
         with patch(
-            "app.api.api_v1.endpoints.oauth.oauth_token_store"
+            "app.api.api_v1.endpoints.oauth.authorization.oauth_token_store"
         ) as mock_store:
             mock_store.get_oauth_session = AsyncMock(return_value=None)
 
@@ -335,7 +335,7 @@ class TestDynamicClientRegistration:
     async def test_register_client_success(self, client: AsyncClient):
         """Test successful client registration."""
         with patch(
-            "app.api.api_v1.endpoints.oauth.oauth_token_store"
+            "app.api.api_v1.endpoints.oauth.registration.oauth_token_store"
         ) as mock_store:
             mock_store.store_client = AsyncMock(return_value=True)
 
@@ -507,7 +507,7 @@ class TestClientValidation:
         from app.api.api_v1.endpoints.oauth import validate_client
 
         with patch(
-            "app.api.api_v1.endpoints.oauth.oauth_token_store"
+            "app.api.api_v1.endpoints.oauth.helpers.oauth_token_store"
         ) as mock_store:
             mock_store.get_client = AsyncMock(return_value=None)
 
@@ -520,7 +520,7 @@ class TestClientValidation:
         from app.api.api_v1.endpoints.oauth import validate_client
 
         with patch(
-            "app.api.api_v1.endpoints.oauth.oauth_token_store"
+            "app.api.api_v1.endpoints.oauth.helpers.oauth_token_store"
         ) as mock_store:
             mock_store.get_client = AsyncMock(
                 return_value={
@@ -540,7 +540,7 @@ class TestOAuthRevokeEndpoint:
 
     @pytest.mark.asyncio
     async def test_revoke_refresh_token_success(self, client: AsyncClient):
-        with patch("app.api.api_v1.endpoints.oauth.oauth_token_store") as mock_store:
+        with patch("app.api.api_v1.endpoints.oauth.token.oauth_token_store") as mock_store:
             mock_store.get_refresh_token = AsyncMock(
                 return_value={"client_id": "ghar360-mcp", "access_token": "a1"}
             )
@@ -549,7 +549,7 @@ class TestOAuthRevokeEndpoint:
             response = await client.post(
                 "/api/v1/mcp/oauth/revoke",
                 data={
-                    "token": "refresh_123",
+                    "token": "***********",
                     "token_type_hint": "refresh_token",
                     "client_id": "ghar360-mcp",
                 },
@@ -559,14 +559,14 @@ class TestOAuthRevokeEndpoint:
 
     @pytest.mark.asyncio
     async def test_revoke_invalid_client_binding(self, client: AsyncClient):
-        with patch("app.api.api_v1.endpoints.oauth.oauth_token_store") as mock_store:
+        with patch("app.api.api_v1.endpoints.oauth.token.oauth_token_store") as mock_store:
             mock_store.get_access_token = AsyncMock(return_value={"client_id": "ghar360-mcp"})
             mock_store.revoke_token_pair = AsyncMock(return_value=True)
 
             response = await client.post(
                 "/api/v1/mcp/oauth/revoke",
                 data={
-                    "token": "access_123",
+                    "token": "**********",
                     "token_type_hint": "access_token",
                     "client_id": "wrong-client",
                 },
@@ -670,7 +670,7 @@ class TestTokenResponseResource:
         resource_uri = "http://test/mcp"
 
         with patch(
-            "app.api.api_v1.endpoints.oauth.oauth_token_store"
+            "app.api.api_v1.endpoints.oauth.token.oauth_token_store"
         ) as mock_store:
             mock_store.get_auth_code = AsyncMock(
                 return_value={
@@ -706,7 +706,7 @@ class TestTokenResponseResource:
         verifier, challenge = generate_pkce_pair()
 
         with patch(
-            "app.api.api_v1.endpoints.oauth.oauth_token_store"
+            "app.api.api_v1.endpoints.oauth.token.oauth_token_store"
         ) as mock_store:
             mock_store.get_auth_code = AsyncMock(
                 return_value={
@@ -741,7 +741,7 @@ class TestTokenResponseResource:
         resource_uri = "http://test/mcp"
 
         with patch(
-            "app.api.api_v1.endpoints.oauth.oauth_token_store"
+            "app.api.api_v1.endpoints.oauth.token.oauth_token_store"
         ) as mock_store:
             mock_store.get_refresh_token = AsyncMock(
                 return_value={

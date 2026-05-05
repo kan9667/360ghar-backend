@@ -16,13 +16,12 @@ Authentication:
     User roles are extracted from the token claims.
 """
 
-from app.mcp.user_server import user_mcp
-from app.mcp.admin_server import admin_mcp
-from app.mcp.auth_provider import SupabaseAuthProvider, configure_fastmcp_auth
+from app.mcp.user import user_mcp
+from app.mcp.admin import admin_mcp
+from app.mcp.auth_provider import SupabaseAuthProvider
 
 __all__ = [
     "user_mcp",
     "admin_mcp",
     "SupabaseAuthProvider",
-    "configure_fastmcp_auth",
 ]

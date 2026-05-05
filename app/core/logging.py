@@ -1,7 +1,9 @@
+import json
 import logging
 import sys
+from datetime import datetime, timezone
 from logging.config import dictConfig
-from typing import Any, Dict
+from typing import Any
 
 from app.core.config import settings
 
@@ -45,6 +47,7 @@ class ColorFormatter(logging.Formatter):
         "relativeCreated",
         "thread",
         "threadName",
+        "taskName",
         "processName",
         "process",
         "message",
@@ -62,7 +65,7 @@ class ColorFormatter(logging.Formatter):
         record.name = display_name
 
         # Build key=value suffix for custom extras
-        extras: Dict[str, Any] = {
+        extras: dict[str, Any] = {
             k: v
             for k, v in record.__dict__.items()
             if k not in self.DEFAULT_ATTRS and not k.startswith("_")
@@ -97,16 +100,71 @@ class ColorFormatter(logging.Formatter):
         ) + suffix
 
 
-def setup_logging() -> None:
-    """Configure application-wide logging with colorized console for TTY.
+class StructuredFormatter(logging.Formatter):
+    """JSON formatter for production log aggregation."""
 
-    - Color output for local terminals; plain text elsewhere
+    # Reuse the same DEFAULT_ATTRS set so extra-field detection stays consistent
+    DEFAULT_ATTRS = ColorFormatter.DEFAULT_ATTRS
+
+    # Keys that should never be logged in plain text
+    SENSITIVE_PATTERNS = {"password", "secret", "token", "api_key", "authorization", "cookie"}
+
+    def format(self, record: logging.LogRecord) -> str:
+        log_entry: dict[str, Any] = {
+            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+
+        # Add exception info if present
+        if record.exc_info and record.exc_info[0] is not None:
+            log_entry["exception"] = {
+                "type": record.exc_info[0].__name__,
+                "message": str(record.exc_info[1]),
+                "traceback": self.formatException(record.exc_info),
+            }
+
+        # Add extra fields (anything not in DEFAULT_ATTRS)
+        extras = {
+            k: v
+            for k, v in record.__dict__.items()
+            if k not in self.DEFAULT_ATTRS and not k.startswith("_")
+        }
+        if extras:
+            sanitized: dict[str, Any] = {}
+            for k, v in extras.items():
+                if any(s in k.lower() for s in self.SENSITIVE_PATTERNS):
+                    sanitized[k] = "[REDACTED]"
+                else:
+                    try:
+                        json.dumps(v)  # Test serializability
+                        sanitized[k] = v
+                    except (TypeError, ValueError):
+                        sanitized[k] = str(v)
+            log_entry["context"] = sanitized
+
+        # Add request_id / correlation_id if available
+        if hasattr(record, "request_id") and record.request_id:
+            log_entry["correlation_id"] = record.request_id
+
+        return json.dumps(log_entry, default=str)
+
+
+def setup_logging() -> None:
+    """Configure application-wide logging.
+
+    - Production: structured JSON for machine parsing and log aggregation
+    - Development + TTY: colorized human-readable output
+    - Development + non-TTY (e.g. Docker): plain text
     - Log level based on DEBUG flag
     - Quiet noisy third-party loggers
+    - RequestIDFilter attached to root handler for correlation-id propagation
     """
     level = "DEBUG" if settings.DEBUG else "INFO"
+    is_production = settings.ENVIRONMENT == "production"
     is_tty = hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
-    use_colors = is_tty and settings.ENVIRONMENT != "production"
+    use_colors = is_tty and not is_production
 
     format_string = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
     date_format = "%H:%M:%S" if use_colors else "%Y-%m-%dT%H:%M:%S%z"
@@ -120,14 +178,20 @@ def setup_logging() -> None:
         }
     }
 
-    formatters = {
+    formatters: dict[str, Any] = {
         "standard": {
             "format": format_string,
             "datefmt": date_format,
         }
     }
 
-    if use_colors:
+    if is_production:
+        # Structured JSON logging for production
+        formatters["structured"] = {
+            "()": "app.core.logging.StructuredFormatter",
+        }
+        handlers["console"]["formatter"] = "structured"
+    elif use_colors:
         formatters["color"] = {
             "()": "app.core.logging.ColorFormatter",
             "fmt": format_string,
@@ -159,6 +223,13 @@ def setup_logging() -> None:
             },
         }
     )
+
+    # Attach RequestIDFilter to root handler so all log records carry correlation_id
+    from app.middleware.security import RequestIDFilter
+
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers:
+        handler.addFilter(RequestIDFilter())
 
 
 def get_logger(name: str) -> logging.Logger:

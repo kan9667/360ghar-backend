@@ -1,0 +1,129 @@
+"""FCM (Firebase Cloud Messaging) token management and message sending."""
+
+from __future__ import annotations
+
+import os
+from typing import TYPE_CHECKING, Any
+
+import httpx
+
+if TYPE_CHECKING:
+    from google.oauth2 import service_account
+
+from app.core.config import settings
+from app.core.exceptions import BadRequestException
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
+
+_fcm_credentials: service_account.Credentials | None = None
+_fcm_token_expiry: float = 0.0
+
+
+def _access_token() -> str:
+    """Create or reuse an OAuth2 access token from the service account file.
+
+    Caches credentials and refreshes only when the token is near expiry.
+    """
+    global _fcm_credentials, _fcm_token_expiry
+
+    # Lazy import to avoid hard dependency at app import time
+    from google.auth.transport.requests import Request  # type: ignore
+    from google.oauth2 import service_account  # type: ignore
+
+    if not settings.FIREBASE_PROJECT_ID:
+        raise RuntimeError("FIREBASE_PROJECT_ID is not configured")
+    creds_path = settings.GOOGLE_APPLICATION_CREDENTIALS
+    if not creds_path or not os.path.exists(creds_path):
+        raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS path is invalid or missing")
+
+    import time as _time
+
+    now = _time.time()
+
+    if _fcm_credentials is None:
+        _fcm_credentials = service_account.Credentials.from_service_account_file(
+            creds_path,
+            scopes=[FCM_SCOPE],
+        )
+
+    if now >= _fcm_token_expiry:
+        _fcm_credentials.refresh(Request())
+        # Tokens typically last 1 hour; refresh 5 minutes early
+        _fcm_token_expiry = now + 3300
+
+    return _fcm_credentials.token
+
+
+def build_message(
+    *,
+    token: str | None = None,
+    topic: str | None = None,
+    title: str | None = None,
+    body: str | None = None,
+    data: dict[str, str] | None = None,
+    deep_link: str | None = None,
+    image: str | None = None,
+    priority_high: bool = True,
+    content_available: bool = False,
+    ttl_seconds: int | None = None,
+) -> dict[str, Any]:
+    """Build an FCM HTTP v1 message payload.
+
+    Supports notification+data and data-only content (iOS background).
+    """
+    data = data or {}
+    if deep_link:
+        data["deep_link"] = deep_link
+
+    msg: dict[str, Any] = {"message": {}}
+    if token:
+        msg["message"]["token"] = token
+    elif topic:
+        msg["message"]["topic"] = topic
+    else:
+        raise BadRequestException(detail="Either token or topic must be provided")
+
+    if title or body or image:
+        msg["message"]["notification"] = {
+            k: v for k, v in [("title", title), ("body", body), ("image", image)] if v
+        }
+
+    if data:
+        msg["message"]["data"] = {k: str(v) for k, v in data.items()}
+
+    if priority_high or ttl_seconds is not None:
+        android_cfg: dict[str, Any] = msg["message"].get("android") or {}
+        if priority_high:
+            android_cfg["priority"] = "HIGH"
+            android_cfg["notification"] = {"channel_id": "high_importance_channel"}
+        if ttl_seconds is not None:
+            android_cfg["ttl"] = f"{int(ttl_seconds)}s"
+        if android_cfg:
+            msg["message"]["android"] = android_cfg
+
+    # APNs headers for alert vs background
+    apns_headers = {"apns-priority": "10", "apns-push-type": "alert"}
+    aps_payload: dict[str, Any] = {"sound": "default"}
+    if content_available:
+        apns_headers = {"apns-priority": "5", "apns-push-type": "background"}
+        aps_payload = {"content-available": 1}
+    msg["message"]["apns"] = {
+        "headers": apns_headers,
+        "payload": {"aps": aps_payload},
+    }
+
+    return msg
+
+
+async def send_message(message: dict[str, Any]) -> dict[str, Any]:
+    """Send a single FCM HTTP v1 message."""
+    token = _access_token()
+    project_id = settings.FIREBASE_PROJECT_ID
+    url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=message)
+        resp.raise_for_status()
+        return resp.json()
