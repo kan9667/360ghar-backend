@@ -1,11 +1,12 @@
 """Auction alert matching — finds new auctions matching user alert preferences."""
 import logging
-from datetime import datetime, timezone, timedelta
-from sqlalchemy import select, and_
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.data_hub.base_scraper import BaseScraper
 from app.models.data_hub import AuctionAlert, BankAuction, CourtAuction
+from app.services.data_hub.base_scraper import BaseScraper
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +21,8 @@ class AlertMatcherService(BaseScraper):
 
     async def _scrape(self) -> list[dict]:
         """Find auction-alert matches. Returns list of match dicts."""
-        from app.core.database import get_async_session_factory
-        session_factory = get_async_session_factory()
+        from app.core.database import get_bg_session_factory
+        session_factory = get_bg_session_factory()
         async with session_factory() as db:
             return await self._find_matches(db)
 

@@ -1,17 +1,16 @@
 """Neighbourhood score scraper — Google Places API scoring for property listings."""
 import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.data_hub.base_scraper import BaseScraper
-from app.models.data_hub import NeighbourhoodScore
 from app.core.config import settings
+from app.models.data_hub import NeighbourhoodScore
+from app.services.data_hub.base_scraper import BaseScraper
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +30,7 @@ _STALE_DAYS = 30  # days before score expires
 class NeighbourhoodScraper(BaseScraper):
     name = "neighbourhood"
 
-    def __init__(self, listing_ids: Optional[list[int]] = None):
+    def __init__(self, listing_ids: list[int] | None = None):
         """
         listing_ids: specific listings to score.
         If None, the scheduler will score all stale/unscored listings.
@@ -47,8 +46,8 @@ class NeighbourhoodScraper(BaseScraper):
             )
             return []
 
-        from app.core.database import get_async_session_factory
-        session_factory = get_async_session_factory()
+        from app.core.database import get_bg_session_factory
+        session_factory = get_bg_session_factory()
         async with session_factory() as db:
             listings_to_score = await self._get_listings_to_score(db)
 

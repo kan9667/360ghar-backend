@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 from pydantic import ValidationInfo, field_validator
@@ -73,6 +72,15 @@ class Settings(BaseSettings):
     SUPABASE_PUBLISHABLE_KEY: str
     SUPABASE_SECRET_KEY: str
     REDIS_URL: str = "redis://localhost:6379"
+
+    # Main pool (HTTP/MCP request traffic)
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 5
+    DB_POOL_TIMEOUT: int = 30
+    DB_POOL_RECYCLE: int = 1800
+    # Background pool (schedulers, scrapers, long-running tasks)
+    DB_BG_POOL_SIZE: int = 2
+    DB_BG_MAX_OVERFLOW: int = 2
 
     @property
     def ASYNC_DATABASE_URL(self) -> str:

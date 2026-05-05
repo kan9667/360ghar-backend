@@ -76,15 +76,18 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint with database connectivity"""
-    try:
-        from app.core.database import AsyncSessionLocal
+    """Health check endpoint with database connectivity.
 
-        # Test database connection
+    Uses a raw engine connection (not the session pool) with a short
+    timeout so the health check never blocks on pool exhaustion.
+    """
+    try:
+        from app.core.database import engine
+
         db_status = "unknown"
         try:
-            async with AsyncSessionLocal() as session:
-                await session.execute(text("SELECT 1"))
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
             db_status = "connected"
         except Exception as db_e:
             logger.error("Database health check failed: %s", db_e)

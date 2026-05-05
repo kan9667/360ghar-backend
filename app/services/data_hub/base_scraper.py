@@ -1,13 +1,13 @@
+import logging
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-import logging
-from typing import Optional
-import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_async_session_factory
+import httpx
+from sqlalchemy.ext.asyncio import AsyncSession
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+
+from app.core.database import get_bg_session_factory
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +18,9 @@ class BaseScraper(ABC):
     name: str = ""                      # e.g. "circle_rates"
     requires_playwright: bool = False
 
-    async def run(self, run_type: str = "cron", triggered_by: Optional[int] = None) -> dict:
+    async def run(self, run_type: str = "cron", triggered_by: int | None = None) -> dict:
         """Orchestrate: create session → start_run → _scrape → _upsert → finish_run."""
-        session_factory = get_async_session_factory()
+        session_factory = get_bg_session_factory()
         async with session_factory() as db:
             run_id = await self._start_run(db, run_type, triggered_by)
             try:
@@ -59,7 +59,7 @@ class BaseScraper(ABC):
             await browser.close()
             await pw.stop()
 
-    async def _start_run(self, db: AsyncSession, run_type: str, triggered_by: Optional[int]) -> int:
+    async def _start_run(self, db: AsyncSession, run_type: str, triggered_by: int | None) -> int:
         """Insert a ScraperRun row and return its id."""
         from app.models.data_hub import ScraperRun
         from app.models.enums import ScraperStatus
@@ -77,12 +77,13 @@ class BaseScraper(ABC):
 
     async def _finish_run(
         self, db: AsyncSession, run_id: int,
-        status: str, stats: dict, error: Optional[str] = None
+        status: str, stats: dict, error: str | None = None
     ) -> None:
         """Update ScraperRun row with final status and stats."""
+        from sqlalchemy import select
+
         from app.models.data_hub import ScraperRun
         from app.models.enums import ScraperStatus
-        from sqlalchemy import select
         result = await db.execute(select(ScraperRun).where(ScraperRun.id == run_id))
         run = result.scalar_one_or_none()
         if run is None:

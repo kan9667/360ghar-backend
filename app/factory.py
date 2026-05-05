@@ -25,7 +25,7 @@ from app.api.api_v1.endpoints.websocket import router as ws_router
 from app.api.share import router as share_router
 from app.core.cache import initialize_cache, shutdown_cache
 from app.core.config import settings
-from app.core.database import engine
+from app.core.database import bg_engine, engine
 from app.core.exceptions import BaseAPIException
 from app.core.logging import get_logger
 from app.mcp.admin import admin_mcp
@@ -172,6 +172,7 @@ def create_app(testing: bool = False) -> FastAPI:
                     except Exception as cache_e:
                         logger.warning("Cache disconnect skipped/failed: %s", cache_e)
                 await engine.dispose()
+                await bg_engine.dispose()
                 logger.info("API shutdown", extra={"event": "shutdown"})
 
     app = FastAPI(

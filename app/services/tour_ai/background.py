@@ -9,7 +9,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_async_session_factory
+from app.core.database import get_bg_session_factory
 from app.core.exceptions import BadRequestException, ForbiddenException
 from app.core.logging import get_logger
 from app.models.enums import TourStatus
@@ -234,7 +234,7 @@ async def _run_tour_generation(
 
     Creates its own database session for the background task.
     """
-    session_factory = get_async_session_factory()
+    session_factory = get_bg_session_factory()
     async with session_factory() as db:
         try:
             await update_job_status(db, job_id, "processing", 5, result={"tour_id": tour_id})
@@ -354,7 +354,7 @@ async def _run_tour_optimization(
 
     Creates its own database session for the background task.
     """
-    session_factory = get_async_session_factory()
+    session_factory = get_bg_session_factory()
     async with session_factory() as db:
         try:
             await update_job_status(db, job_id, "processing", 5, result={"tour_id": tour_id})

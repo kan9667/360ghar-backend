@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_async_session_factory
+from app.core.database import get_bg_session_factory
 from app.core.exceptions import BadRequestException, ForbiddenException
 from app.core.logging import get_logger
 from app.models.tours import AIJob
@@ -86,7 +86,7 @@ async def _run_scene_analysis(job_id: str, scene_id: str, image_url: str):
     Creates its own database session for the background task.
     """
 
-    session_factory = get_async_session_factory()
+    session_factory = get_bg_session_factory()
     async with session_factory() as db:
         try:
             await update_job_status(db, job_id, "processing", 10)
@@ -133,7 +133,7 @@ async def _run_tour_analysis(job_id: str, tour_id: str):
     """
     from app.models.tours import Scene, Tour
 
-    session_factory = get_async_session_factory()
+    session_factory = get_bg_session_factory()
     async with session_factory() as db:
         try:
             await update_job_status(db, job_id, "processing", 5)
@@ -253,7 +253,7 @@ async def _run_description_generation(job_id: str, scene_id: str, image_url: str
 
     Creates its own database session for the background task.
     """
-    session_factory = get_async_session_factory()
+    session_factory = get_bg_session_factory()
     async with session_factory() as db:
         try:
             await update_job_status(db, job_id, "processing", 10)
@@ -321,7 +321,7 @@ async def _run_tour_description_generation(job_id: str, tour_id: str, options: d
     """
     from app.models.tours import Scene
 
-    session_factory = get_async_session_factory()
+    session_factory = get_bg_session_factory()
     async with session_factory() as db:
         try:
             await update_job_status(db, job_id, "processing", 5)

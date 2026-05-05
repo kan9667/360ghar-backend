@@ -6,7 +6,6 @@ background image processing.
 """
 
 import asyncio
-from typing import List, Optional
 from uuid import uuid4
 
 from sqlalchemy import and_, func, select
@@ -19,7 +18,7 @@ from app.core.exceptions import (
     SceneNotFoundException,
 )
 from app.core.logging import get_logger
-from app.models.tours import Scene, Tour
+from app.models.tours import Scene
 from app.schemas.tour import SceneCreate, SceneUpdate
 from app.services.tour.helpers import (
     _ensure_scene_ownership,
@@ -31,7 +30,7 @@ from app.services.tour.tours import get_tour
 logger = get_logger(__name__)
 
 
-async def get_scenes(db: AsyncSession, tour_id: str, user_id: Optional[int] = None) -> List[Scene]:
+async def get_scenes(db: AsyncSession, tour_id: str, user_id: int | None = None) -> list[Scene]:
     """Get all scenes for a tour."""
     # Verify tour access
     await get_tour(db, tour_id, user_id, include_scenes=False)
@@ -47,7 +46,7 @@ async def get_scenes(db: AsyncSession, tour_id: str, user_id: Optional[int] = No
     return list(result.scalars().all())
 
 
-async def get_scene(db: AsyncSession, scene_id: str, user_id: Optional[int] = None) -> Scene:
+async def get_scene(db: AsyncSession, scene_id: str, user_id: int | None = None) -> Scene:
     """Get a single scene by ID."""
     query = (
         select(Scene)
@@ -118,7 +117,7 @@ async def update_scene(db: AsyncSession, scene_id: str, user_id: int, data: Scen
     for field, value in update_data.items():
         if field == "metadata" and value is not None:
             value = value if isinstance(value, dict) else value.model_dump()
-            setattr(scene, "scene_metadata", value)
+            scene.scene_metadata = value
         else:
             setattr(scene, field, value)
 
@@ -141,8 +140,8 @@ async def delete_scene(db: AsyncSession, scene_id: str, user_id: int) -> bool:
 
 
 async def reorder_scenes(
-    db: AsyncSession, tour_id: str, user_id: int, scene_ids: List[str]
-) -> List[Scene]:
+    db: AsyncSession, tour_id: str, user_id: int, scene_ids: list[str]
+) -> list[Scene]:
     """Reorder scenes in a tour."""
     tour = await get_tour(db, tour_id, user_id, include_scenes=False)
     _ensure_tour_ownership(tour, user_id, "reorder scenes in")
@@ -211,7 +210,7 @@ async def process_scene_image_background(
         db_url: Database URL for creating a new session
         user_id: User ID for user-scoped storage paths
     """
-    from app.core.database import get_async_session_factory
+    from app.core.database import get_bg_session_factory
     from app.services.storage import storage_service
 
     try:
@@ -226,7 +225,7 @@ async def process_scene_image_background(
         )
 
         # Create a new database session for the background task
-        session_factory = get_async_session_factory()
+        session_factory = get_bg_session_factory()
         async with session_factory() as db:
             # Update the scene with the processed data
             query = select(Scene).where(Scene.id == scene_id)
@@ -261,7 +260,7 @@ async def process_scene_image_background(
         logger.error("Failed to process scene %s: %s", scene_id, e)
         # Mark scene as failed
         try:
-            session_factory = get_async_session_factory()
+            session_factory = get_bg_session_factory()
             async with session_factory() as db:
                 query = select(Scene).where(Scene.id == scene_id)
                 db_result = await db.execute(query)
