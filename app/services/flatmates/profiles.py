@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import BadRequestException
 from app.core.logging import get_logger
 from app.models.enums import (
+    FlatmatesProfileStatus,
     PropertyPurpose,
     PropertyType,
 )
@@ -29,6 +30,23 @@ from app.services.notifications import _supa, list_notifications_for_user
 logger = get_logger(__name__)
 
 
+def _move_in_profile_values(move_in: str | None) -> set[str]:
+    if move_in is None:
+        return set()
+    value = move_in.strip().lower().replace("-", "_")
+    if value in {"", "all", "any", "anytime", "flexible", "just_exploring"}:
+        return set()
+    if value in {"immediate", "immediately", "now"}:
+        return {"immediate", "immediately", "now"}
+    if value in {"this_month", "within_1_month", "within_a_month"}:
+        return {"this_month", "within_1_month", "within_a_month"}
+    if value == "next_month":
+        return {"next_month"}
+    if value in {"within_2_weeks", "two_weeks"}:
+        return {"within_2_weeks", "two_weeks"}
+    return set()
+
+
 async def get_flatmates_profile(db: AsyncSession, user_id: int) -> dict[str, Any]:
     user = await db.get(User, user_id)
     if user is None:
@@ -43,6 +61,7 @@ async def list_discoverable_profiles(
     city: str | None = None,
     budget_min: int | None = None,
     budget_max: int | None = None,
+    move_in: str | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
@@ -71,19 +90,22 @@ async def list_discoverable_profiles(
     filters = [
         User.id.notin_(excluded),
         User.flatmates_onboarding_completed.is_(True),
+        User.flatmates_profile_status == FlatmatesProfileStatus.active,
     ]
 
     for nn in non_negotiables:
         if nn == "food_veg_only":
-            filters.append(User.flatmates_food_habits.in_(["veg", "vegan"]))
+            filters.append(User.flatmates_food_habits.in_(["vegetarian", "vegan", "veg"]))
         elif nn == "food_vegan_only":
             filters.append(User.flatmates_food_habits == "vegan")
         elif nn == "no_smoking":
-            filters.append(User.flatmates_smoking_drinking == "never")
+            filters.append(User.flatmates_smoking_drinking.in_(["neither", "never"]))
         elif nn == "no_drinking":
-            filters.append(User.flatmates_smoking_drinking.in_(["never", "occasionally"]))
+            filters.append(
+                User.flatmates_smoking_drinking.in_(["neither", "never", "smoke_outside"])
+            )
         elif nn == "no_overnight_guests":
-            filters.append(User.flatmates_guests_policy.in_(["rarely"]))
+            filters.append(User.flatmates_guests_policy.in_(["no_overnight_guests", "rarely"]))
         elif nn == "no_pets":
             # pets is stored inside preferences.flatmates.pets
             filters.append(
@@ -102,11 +124,13 @@ async def list_discoverable_profiles(
             # parties_at_home stored in preferences.flatmates.parties_at_home
             filters.append(
                 func.coalesce(User.preferences["flatmates"]["parties_at_home"].astext, "").notin_(
-                    ["occasionally", "regularly"]
+                    ["occasional_weekends", "party_friendly", "occasionally", "regularly"]
                 )
             )
         elif nn == "min_tidy":
-            filters.append(User.flatmates_cleanliness.in_(["balanced", "meticulous"]))
+            filters.append(
+                User.flatmates_cleanliness.in_(["tidy", "spotless", "balanced", "meticulous"])
+            )
 
     # --- Discovery filtering (P0-8) ---
     if city is not None:
@@ -125,6 +149,9 @@ async def list_discoverable_profiles(
                 User.flatmates_budget_min.is_(None),
             )
         )
+    move_in_values = _move_in_profile_values(move_in)
+    if move_in_values:
+        filters.append(User.flatmates_move_in_timeline.in_(move_in_values))
 
     stmt = (
         select(User)

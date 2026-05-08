@@ -170,9 +170,11 @@ class TestNotifyDeepLinks:
                 mock_db_session,
                 recipient_db_id=1,
                 listing_title="Room A",
+                boosted_for_hours=24,
             )
             call_kwargs = mock_dispatch.call_args.kwargs
             assert "/post" in str(call_kwargs.get("deep_link", ""))
+            assert "boosted for 24 hours" in call_kwargs["body"]
 
     @pytest.mark.asyncio
     async def test_visit_routes(self, mock_db_session):

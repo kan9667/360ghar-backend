@@ -5,11 +5,11 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from app.models.enums import (
+    PG_FLATMATE_TYPES,
     ImageCategory,
     ListingGenderPreference,
     ListingSharingType,
     ManagedPropertyStatus,
-    PG_FLATMATE_TYPES,
     PropertyPurpose,
     PropertyStatus,
     PropertyType,
@@ -105,6 +105,7 @@ class PropertyCreate(PropertyBase):
     amenity_ids: list[int] | None = None
     features: list[str] | None = None
     main_image_url: str | None = None
+    image_urls: list[str] | None = None
     virtual_tour_url: str | None = None
     available_from: str | None = None
     calendar_data: dict[str, Any] | None = None
@@ -140,7 +141,7 @@ class PropertyCreate(PropertyBase):
             return ValidationUtils.validate_pincode(v)
         return v
 
-    @field_validator("video_urls")
+    @field_validator("video_urls", "image_urls")
     @classmethod
     def validate_media_urls(cls, v: list[str] | None) -> list[str] | None:
         if v:
@@ -184,13 +185,14 @@ class PropertyUpdate(BaseModel):
     listing_preferences: ListingPreferences | None = None
     calendar_data: dict[str, Any] | None = None
     main_image_url: str | None = None
+    image_urls: list[str] | None = None
     virtual_tour_url: str | None = None
     floor_plan_url: str | None = None
     video_tour_url: str | None = None
     video_urls: list[str] | None = None
     google_street_view_url: str | None = None
 
-    @field_validator("video_urls")
+    @field_validator("video_urls", "image_urls")
     @classmethod
     def validate_media_urls(cls, v: list[str] | None) -> list[str] | None:
         if v:
@@ -352,6 +354,7 @@ class UnifiedPropertyFilter(BaseModel):
     sharing_type: ListingSharingType | None = None
 
     available_from: str | None = None
+    move_in: str | None = None
     check_in_date: str | None = None
     check_out_date: str | None = None
     guests: int | None = None

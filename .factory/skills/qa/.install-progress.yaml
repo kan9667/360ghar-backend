@@ -2,7 +2,7 @@ category_1:
   default_target: local_dev
   environments:
     local_dev:
-      url: http://localhost:8000
+      url: http://localhost:3600
     production:
       url: https://api.360ghar.com
   restrictions: []

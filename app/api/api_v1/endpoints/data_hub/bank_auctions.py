@@ -7,16 +7,19 @@ from sqlalchemy import and_, func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.logging import get_logger
 from app.models.data_hub import BankAuction, CourtAuction
 from app.schemas.data_hub import (
     AuctionListResponse,
     BankAuctionResponse,
     CourtAuctionResponse,
+    DataHubMeta,
 )
 
-from .helpers import _meta_from_table, _paginate
+from .helpers import _meta_from_table, _paginate, _safe_list_query
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 
 @router.get("/auctions/banks", response_model=list[str])
@@ -167,9 +170,16 @@ async def list_auctions(
             count_q = count_q.where(and_(*filters))
             data_q = data_q.where(and_(*filters))
 
-        total = (await db.execute(count_q)).scalar_one()
-        rows = (await db.execute(data_q.offset(offset).limit(limit))).scalars().all()
-        # Map CourtAuction rows to BankAuctionResponse-compatible dicts
+        try:
+            total = (await db.execute(count_q)).scalar_one()
+            rows = (await db.execute(data_q.offset(offset).limit(limit))).scalars().all()
+            meta = await _meta_from_table(db, CourtAuction)
+        except Exception as exc:
+            logger.warning("Court auctions query failed: %s", exc)
+            total = 0
+            rows = []
+            meta = DataHubMeta()
+
         items = []
         for r in rows:
             items.append(
@@ -194,7 +204,6 @@ async def list_auctions(
                     updated_at=r.updated_at,
                 )
             )
-        meta = await _meta_from_table(db, CourtAuction)
         return {
             "items": items,
             "meta": meta,
@@ -226,9 +235,7 @@ async def list_auctions(
             count_q = count_q.where(and_(*filters))
             data_q = data_q.where(and_(*filters))
 
-        total = (await db.execute(count_q)).scalar_one()
-        rows = (await db.execute(data_q.offset(offset).limit(limit))).scalars().all()
-        meta = await _meta_from_table(db, BankAuction)
+        rows, total, meta = await _safe_list_query(db, BankAuction, count_q, data_q, offset, limit, page)
         return {
             "items": rows,
             "meta": meta,

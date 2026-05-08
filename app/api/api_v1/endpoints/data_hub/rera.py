@@ -6,18 +6,21 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.logging import get_logger
 from app.models.data_hub import ReraComplaint, ReraProject
 from app.schemas.data_hub import (
     BuilderListResponse,
     BuilderReputationResponse,
+    DataHubMeta,
     ReraProjectListResponse,
     ReraProjectResponse,
 )
 from app.services.data_hub.utils import calculate_builder_score
 
-from .helpers import _meta_from_table, _paginate
+from .helpers import _meta_from_table, _paginate, _safe_list_query
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 
 @router.get("/rera-projects", response_model=ReraProjectListResponse)
@@ -44,10 +47,8 @@ async def list_rera_projects(
         count_q = count_q.where(and_(*filters))
         data_q = data_q.where(and_(*filters))
 
-    total = (await db.execute(count_q)).scalar_one()
     offset = (page - 1) * limit
-    rows = (await db.execute(data_q.offset(offset).limit(limit))).scalars().all()
-    meta = await _meta_from_table(db, ReraProject)
+    rows, total, meta = await _safe_list_query(db, ReraProject, count_q, data_q, offset, limit, page)
 
     return {
         "items": rows,
@@ -94,7 +95,6 @@ async def list_builders(
     db: AsyncSession = Depends(get_db),
 ):
     """List builders aggregated from RERA projects, with complaint counts and scores."""
-    # Build subquery: distinct developer slugs with name and project/complaint counts
     filters = []
     if q:
         filters.append(ReraProject.developer_name.ilike(f"%{q}%"))
@@ -111,25 +111,32 @@ async def list_builders(
     if filters:
         slug_q = slug_q.where(and_(*filters))
 
-    # Fetch ALL builder rows (no pagination yet) so we can sort before slicing
-    all_rows = (await db.execute(slug_q)).all()
+    try:
+        all_rows = (await db.execute(slug_q)).all()
+    except Exception as exc:
+        logger.warning("Builders query failed: %s", exc)
+        return {
+            "items": [],
+            "meta": DataHubMeta(),
+            **_paginate(0, page, limit),
+        }
 
-    # Collect all builder slugs for bulk lookups
     all_slugs = [r.slug for r in all_rows if r.slug]
 
-    # Bulk-fetch complaint counts
     complaint_counts: dict[str, int] = {}
     if all_slugs:
-        complaint_count_rows = (
-            await db.execute(
-                select(ReraComplaint.builder_slug, func.count().label("cnt"))
-                .where(ReraComplaint.builder_slug.in_(all_slugs))
-                .group_by(ReraComplaint.builder_slug)
-            )
-        ).all()
-        complaint_counts = {r.builder_slug: r.cnt for r in complaint_count_rows}
+        try:
+            complaint_count_rows = (
+                await db.execute(
+                    select(ReraComplaint.builder_slug, func.count().label("cnt"))
+                    .where(ReraComplaint.builder_slug.in_(all_slugs))
+                    .group_by(ReraComplaint.builder_slug)
+                )
+            ).all()
+            complaint_counts = {r.builder_slug: r.cnt for r in complaint_count_rows}
+        except Exception as exc:
+            logger.warning("Builders complaint counts failed: %s", exc)
 
-    # Build unsorted list with scores
     all_items: list[BuilderReputationResponse] = []
     for row in all_rows:
         builder_slug = row.slug
@@ -149,7 +156,6 @@ async def list_builders(
             )
         )
 
-    # Sort before pagination
     if order_by == "score":
         all_items.sort(key=lambda x: x.builder_score, reverse=True)
 
@@ -157,34 +163,38 @@ async def list_builders(
     offset = (page - 1) * limit
     page_items = all_items[offset: offset + limit]
 
-    # Bulk-fetch projects and recent complaints only for the current page slice
     page_slugs = [item.slug for item in page_items if item.slug]
 
     projects_by_slug: dict[str, list] = {s: [] for s in page_slugs}
     if page_slugs:
-        proj_rows = (
-            await db.execute(
-                select(ReraProject).where(ReraProject.developer_slug.in_(page_slugs))
-            )
-        ).scalars().all()
-        for p in proj_rows:
-            if p.developer_slug in projects_by_slug:
-                projects_by_slug[p.developer_slug].append(p)
+        try:
+            proj_rows = (
+                await db.execute(
+                    select(ReraProject).where(ReraProject.developer_slug.in_(page_slugs))
+                )
+            ).scalars().all()
+            for p in proj_rows:
+                if p.developer_slug in projects_by_slug:
+                    projects_by_slug[p.developer_slug].append(p)
+        except Exception as exc:
+            logger.warning("Builders project lookup failed: %s", exc)
 
     complaints_by_slug: dict[str, list] = {s: [] for s in page_slugs}
     if page_slugs:
-        comp_rows = (
-            await db.execute(
-                select(ReraComplaint)
-                .where(ReraComplaint.builder_slug.in_(page_slugs))
-                .order_by(ReraComplaint.order_date.desc())
-            )
-        ).scalars().all()
-        for c in comp_rows:
-            if c.builder_slug in complaints_by_slug:
-                complaints_by_slug[c.builder_slug].append(c)
+        try:
+            comp_rows = (
+                await db.execute(
+                    select(ReraComplaint)
+                    .where(ReraComplaint.builder_slug.in_(page_slugs))
+                    .order_by(ReraComplaint.order_date.desc())
+                )
+            ).scalars().all()
+            for c in comp_rows:
+                if c.builder_slug in complaints_by_slug:
+                    complaints_by_slug[c.builder_slug].append(c)
+        except Exception as exc:
+            logger.warning("Builders complaint lookup failed: %s", exc)
 
-    # Attach projects/complaints (cap at 5 each) to each page item
     items = []
     for item in page_items:
         item.rera_projects = projects_by_slug.get(item.slug, [])[:5]

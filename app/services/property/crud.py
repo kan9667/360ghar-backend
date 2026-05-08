@@ -1,5 +1,7 @@
 """Create, read, update, delete operations for properties."""
 
+from datetime import datetime, timezone
+
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,18 +16,74 @@ from app.core.exceptions import (
     UserNotFoundException,
 )
 from app.core.logging import get_logger
-from app.models.enums import PG_FLATMATE_TYPES, PropertyPurpose, PropertyType, UserRole
-from app.models.properties import Amenity, Property, PropertyAmenity
+from app.models.enums import (
+    PG_FLATMATE_TYPES,
+    ImageCategory,
+    PropertyPurpose,
+    PropertyType,
+    UserRole,
+)
+from app.models.properties import Amenity, Property, PropertyAmenity, PropertyImage
 from app.models.users import User as UserModel
 from app.repositories.property_repository import PropertyRepository
 from app.schemas.amenity import Amenity as AmenitySchema
 from app.schemas.property import Property as PropertySchema
 from app.schemas.property import PropertyCreate, PropertyUpdate
 from app.schemas.user import User as UserSchema
+from app.services.flatmates.helpers import geocode_listing
+from app.services.flatmates.moderation import (
+    apply_expired_move_in_pause,
+    apply_listing_prescreen_metadata,
+)
 from app.services.pm_authz import _get_actor_role
 from app.services.property.helpers import _validate_listing_contract, build_location_wkt
 
 logger = get_logger(__name__)
+
+
+def _clean_image_urls(image_urls: list[str] | None) -> list[str]:
+    cleaned_urls: list[str] = []
+    seen_urls: set[str] = set()
+    for raw_url in image_urls or []:
+        url = str(raw_url).strip()
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        cleaned_urls.append(url)
+    return cleaned_urls
+
+
+def _owner_moderation_status_toggle(update_data: dict) -> str | None:
+    if set(update_data) != {"listing_preferences"}:
+        return None
+    incoming_preferences = update_data.get("listing_preferences")
+    if not isinstance(incoming_preferences, dict):
+        return None
+    moderation_status = incoming_preferences.get("moderation_status")
+    return moderation_status if moderation_status in {"live", "paused"} else None
+
+
+async def _replace_property_images(
+    db: AsyncSession,
+    *,
+    property_id: int,
+    image_urls: list[str],
+) -> None:
+    await db.execute(
+        sa_delete(PropertyImage).where(
+            PropertyImage.property_id == property_id,
+            PropertyImage.image_category != ImageCategory.floor_plan,
+        )
+    )
+    for index, image_url in enumerate(image_urls):
+        db.add(
+            PropertyImage(
+                property_id=property_id,
+                image_url=image_url,
+                display_order=index,
+                is_main_image=index == 0,
+            )
+        )
 
 
 async def create_property(
@@ -68,6 +126,9 @@ async def create_property(
         _validate_listing_contract(property_data.property_type, property_data.purpose)
 
         property_dict = property_data.model_dump(exclude_unset=True, mode="json")
+        image_urls = _clean_image_urls(property_dict.pop("image_urls", None))
+        if image_urls and not property_dict.get("main_image_url"):
+            property_dict["main_image_url"] = image_urls[0]
         property_dict["owner_id"] = owner_id
 
         if property_data.property_type in PG_FLATMATE_TYPES:
@@ -77,13 +138,24 @@ async def create_property(
             property_dict["is_available"] = False
 
         # Create WKT for location
-        wkt = build_location_wkt(
-            property_dict.get("latitude"), property_dict.get("longitude")
-        )
+        wkt = build_location_wkt(property_dict.get("latitude"), property_dict.get("longitude"))
         if wkt is not None:
             property_dict["location"] = wkt
 
         db_property = await repo.create(Property(**property_dict))
+        if image_urls:
+            await _replace_property_images(
+                db,
+                property_id=db_property.id,
+                image_urls=image_urls,
+            )
+        if property_data.property_type in PG_FLATMATE_TYPES:
+            apply_listing_prescreen_metadata(
+                db_property,
+                image_urls=image_urls if image_urls else None,
+            )
+            await db.flush()
+            await geocode_listing(db, db_property.id)
         await PropertyCacheManager.invalidate_property_caches(db_property.id)
 
         property_with_relations = await repo.get_property_with_owner(db_property.id)
@@ -107,6 +179,8 @@ async def get_property(db: AsyncSession, property_id: int) -> PropertySchema:
         if not property_obj:
             logger.warning("Property %s not found", property_id)
             raise PropertyNotFoundException(property_id=property_id)
+        if apply_expired_move_in_pause(property_obj):
+            await db.flush()
 
         logger.debug(
             "Property found",
@@ -134,6 +208,12 @@ async def list_user_properties(db: AsyncSession, owner_id: int) -> list[Property
     )
     res = await db.execute(stmt)
     properties = res.scalars().all()
+    paused_count = 0
+    for property_obj in properties:
+        if apply_expired_move_in_pause(property_obj):
+            paused_count += 1
+    if paused_count:
+        await db.flush()
     return [PropertySchema.model_validate(p) for p in properties]
 
 
@@ -177,6 +257,10 @@ async def update_property(
                 )
 
         update_data = property_update.model_dump(exclude_unset=True, mode="json")
+        image_urls_present = "image_urls" in update_data
+        image_urls = _clean_image_urls(update_data.pop("image_urls", None))
+        if image_urls_present and "main_image_url" not in update_data:
+            update_data["main_image_url"] = image_urls[0] if image_urls else None
         final_property_type = update_data.get("property_type", property_obj.property_type)
         final_purpose = update_data.get("purpose", property_obj.purpose)
         if isinstance(final_property_type, str):
@@ -185,21 +269,34 @@ async def update_property(
             final_purpose = PropertyPurpose(final_purpose)
         _validate_listing_contract(final_property_type, final_purpose)
 
+        owner_status_toggle = (
+            _owner_moderation_status_toggle(update_data)
+            if final_property_type in PG_FLATMATE_TYPES and actor_role != UserRole.admin
+            else None
+        )
+
         if final_property_type in PG_FLATMATE_TYPES and actor_role != UserRole.admin:
             existing_preferences = (
                 dict(property_obj.listing_preferences)
                 if isinstance(property_obj.listing_preferences, dict)
                 else {}
             )
-            incoming_preferences = update_data.get("listing_preferences")
-            if isinstance(incoming_preferences, dict):
-                incoming_preferences.pop("moderation_status", None)
-                incoming_preferences.pop("moderated_by", None)
-                incoming_preferences.pop("moderated_at", None)
-                existing_preferences.update(incoming_preferences)
-            existing_preferences["moderation_status"] = "pending_review"
+            if owner_status_toggle is not None:
+                existing_preferences["moderation_status"] = owner_status_toggle
+                existing_preferences["owner_status_updated_at"] = datetime.now(
+                    timezone.utc
+                ).isoformat()
+                update_data["is_available"] = owner_status_toggle == "live"
+            else:
+                incoming_preferences = update_data.get("listing_preferences")
+                if isinstance(incoming_preferences, dict):
+                    incoming_preferences.pop("moderation_status", None)
+                    incoming_preferences.pop("moderated_by", None)
+                    incoming_preferences.pop("moderated_at", None)
+                    existing_preferences.update(incoming_preferences)
+                existing_preferences["moderation_status"] = "pending_review"
+                update_data["is_available"] = False
             update_data["listing_preferences"] = existing_preferences
-            update_data["is_available"] = False
 
         # Handle location update
         if "latitude" in update_data or "longitude" in update_data:
@@ -212,7 +309,28 @@ async def update_property(
         for field, value in update_data.items():
             setattr(property_obj, field, value)
 
+        if image_urls_present:
+            await _replace_property_images(
+                db,
+                property_id=property_id,
+                image_urls=image_urls,
+            )
+
+        if (
+            final_property_type in PG_FLATMATE_TYPES
+            and actor_role != UserRole.admin
+            and owner_status_toggle is None
+        ):
+            apply_listing_prescreen_metadata(
+                property_obj,
+                image_urls=image_urls if image_urls_present else None,
+            )
+        if final_property_type in PG_FLATMATE_TYPES:
+            apply_expired_move_in_pause(property_obj)
+
         await db.flush()
+        if final_property_type in PG_FLATMATE_TYPES:
+            await geocode_listing(db, property_id)
         await db.refresh(property_obj)
         await PropertyCacheManager.invalidate_property_caches(property_id)
 
@@ -325,7 +443,9 @@ async def increment_property_view_count(db: AsyncSession, property_id: int):
 
         return result.rowcount > 0
     except Exception as e:
-        logger.error("Failed to increment view count for property %s: %s", property_id, e, exc_info=True)
+        logger.error(
+            "Failed to increment view count for property %s: %s", property_id, e, exc_info=True
+        )
         raise
 
 

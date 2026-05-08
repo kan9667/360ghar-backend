@@ -22,6 +22,7 @@ from app.schemas.property import (
     UnifiedPropertyResponse,
 )
 from app.schemas.user import User as UserSchema
+from app.services.flatmates import pause_expired_flatmate_listings
 from app.services.property import (
     create_property,
     delete_property,
@@ -71,6 +72,11 @@ def build_property_filters(
     features: list[str] | None = Query(None),
     gender_preference: ListingGenderPreference | None = Query(None),
     sharing_type: ListingSharingType | None = Query(None),
+    available_from: str | None = Query(None, description="Minimum availability date (YYYY-MM-DD)"),
+    move_in: str | None = Query(
+        None,
+        description="Move-in timeline: immediate, this_month, next_month, flexible",
+    ),
     parking_spaces_min: int | None = Query(None, ge=0),
     floor_number_min: int | None = Query(None, ge=0),
     floor_number_max: int | None = Query(None, le=100),
@@ -113,6 +119,8 @@ def build_property_filters(
         features=features,
         gender_preference=gender_preference,
         sharing_type=sharing_type,
+        available_from=available_from,
+        move_in=move_in,
         parking_spaces_min=parking_spaces_min,
         floor_number_min=floor_number_min,
         floor_number_max=floor_number_max,
@@ -150,7 +158,9 @@ async def create_new_property(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new property (requires authentication)"""
-    logger.info("User %s creating property of type %s", current_user.id, property_data.property_type)
+    logger.info(
+        "User %s creating property of type %s", current_user.id, property_data.property_type
+    )
     try:
         # Determine owner
         target_owner_id = current_user.id
@@ -219,9 +229,14 @@ async def get_properties_list(
 
     try:
         effective_page = (offset // limit) + 1 if offset is not None else page
+        await pause_expired_flatmate_listings(db)
         result = await get_unified_properties_optimized(db, filters, user_id, effective_page, limit)
 
-        logger.info("Property search completed - found %s properties, returning page %s", result.get('total', 0), effective_page)
+        logger.info(
+            "Property search completed - found %s properties, returning page %s",
+            result.get("total", 0),
+            effective_page,
+        )
 
         return _build_response_payload(result, filters, effective_page, limit)
     except Exception as e:
@@ -240,7 +255,7 @@ async def get_properties_list(
                 detail="Property search is temporarily unavailable. Please retry shortly.",
                 details={"error_code": error_code, "endpoint": "get_properties_list"},
             ) from e
-        logger.error("Property search failed for user %s: %s", user_id or 'anonymous', e)
+        logger.error("Property search failed for user %s: %s", user_id or "anonymous", e)
         raise
 
 
@@ -271,6 +286,7 @@ async def semantic_property_search(
     )
 
     try:
+        await pause_expired_flatmate_listings(db)
         result = await get_unified_properties_optimized(db, filters, user_id, page, limit)
         return _build_response_payload(result, filters, page, limit)
     except Exception as e:
@@ -302,6 +318,7 @@ async def get_recommendations(
     """
     user_id = current_user.id if current_user else None
     try:
+        await pause_expired_flatmate_listings(db)
         return await get_property_recommendations(db, user_id, limit)
     except Exception as e:
         if is_transient_db_error(e):

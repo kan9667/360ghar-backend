@@ -8,11 +8,27 @@ BEGIN;
 
 -- ---------------------------------------------------------------------------
 -- Enum types for data hub
+-- (CREATE TYPE does not support IF NOT EXISTS; use DO $$ EXCEPTION blocks)
 -- ---------------------------------------------------------------------------
-CREATE TYPE IF NOT EXISTS scraper_status AS ENUM ('running', 'success', 'partial', 'failed');
-CREATE TYPE IF NOT EXISTS auction_source AS ENUM ('sarfaesi', 'ibapi', 'mstc', 'drt', 'ecourts');
-CREATE TYPE IF NOT EXISTS gazette_type AS ENUM ('land_acquisition', 'rate_revision', 'policy', 'clu_change');
-CREATE TYPE IF NOT EXISTS complaint_nature AS ENUM ('delay', 'quality', 'refund', 'compensation', 'other');
+DO $$ BEGIN
+    CREATE TYPE scraper_status AS ENUM ('running', 'success', 'partial', 'failed');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE auction_source AS ENUM ('sarfaesi', 'ibapi', 'mstc', 'drt', 'ecourts');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE gazette_type AS ENUM ('land_acquisition', 'rate_revision', 'policy', 'clu_change');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE complaint_nature AS ENUM ('delay', 'quality', 'refund', 'compensation', 'other');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- 1. circle_rates
@@ -38,9 +54,9 @@ CREATE TABLE IF NOT EXISTS circle_rates (
     UNIQUE(sector, colony, property_type, revision_year)
 );
 
-CREATE UNIQUE INDEX idx_circle_rates_slug ON circle_rates (slug);
-CREATE INDEX idx_circle_rates_sector_type ON circle_rates (sector, property_type);
-CREATE INDEX idx_circle_rates_revision_year ON circle_rates (revision_year DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_circle_rates_slug ON circle_rates (slug);
+CREATE INDEX IF NOT EXISTS idx_circle_rates_sector_type ON circle_rates (sector, property_type);
+CREATE INDEX IF NOT EXISTS idx_circle_rates_revision_year ON circle_rates (revision_year DESC);
 
 -- ---------------------------------------------------------------------------
 -- 2. rera_projects
@@ -69,9 +85,9 @@ CREATE TABLE IF NOT EXISTS rera_projects (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_rera_projects_developer_slug ON rera_projects (developer_slug);
-CREATE INDEX idx_rera_projects_status ON rera_projects (status);
-CREATE INDEX idx_rera_projects_location ON rera_projects (location);
+CREATE INDEX IF NOT EXISTS idx_rera_projects_developer_slug ON rera_projects (developer_slug);
+CREATE INDEX IF NOT EXISTS idx_rera_projects_status ON rera_projects (status);
+CREATE INDEX IF NOT EXISTS idx_rera_projects_location ON rera_projects (location);
 
 -- ---------------------------------------------------------------------------
 -- 3. bank_auctions
@@ -104,10 +120,10 @@ CREATE TABLE IF NOT EXISTS bank_auctions (
     UNIQUE(bank_name, normalized_address_hash, auction_date)
 );
 
-CREATE INDEX idx_bank_auctions_city_active ON bank_auctions (city, is_active);
-CREATE INDEX idx_bank_auctions_auction_date ON bank_auctions (auction_date DESC) WHERE is_active;
-CREATE INDEX idx_bank_auctions_type_active ON bank_auctions (property_type, is_active);
-CREATE INDEX idx_bank_auctions_reserve_price ON bank_auctions (reserve_price) WHERE is_active;
+CREATE INDEX IF NOT EXISTS idx_bank_auctions_city_active ON bank_auctions (city, is_active);
+CREATE INDEX IF NOT EXISTS idx_bank_auctions_auction_date ON bank_auctions (auction_date DESC) WHERE is_active;
+CREATE INDEX IF NOT EXISTS idx_bank_auctions_type_active ON bank_auctions (property_type, is_active);
+CREATE INDEX IF NOT EXISTS idx_bank_auctions_reserve_price ON bank_auctions (reserve_price) WHERE is_active;
 
 -- ---------------------------------------------------------------------------
 -- 4. auction_alerts
@@ -129,7 +145,7 @@ CREATE TABLE IF NOT EXISTS auction_alerts (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_auction_alerts_user_active ON auction_alerts (user_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_auction_alerts_user_active ON auction_alerts (user_id, is_active);
 
 -- ---------------------------------------------------------------------------
 -- 5. bank_rates
@@ -148,7 +164,7 @@ CREATE TABLE IF NOT EXISTS bank_rates (
     UNIQUE(bank_name, rate_type, effective_date)
 );
 
-CREATE INDEX idx_bank_rates_bank_type ON bank_rates (bank_name, rate_type);
+CREATE INDEX IF NOT EXISTS idx_bank_rates_bank_type ON bank_rates (bank_name, rate_type);
 
 -- ---------------------------------------------------------------------------
 -- 6. jamabandi_cache
@@ -172,8 +188,8 @@ CREATE TABLE IF NOT EXISTS jamabandi_cache (
     UNIQUE(tehsil, village, khasra_number)
 );
 
-CREATE INDEX idx_jamabandi_cache_lookup ON jamabandi_cache (tehsil, village, khasra_number);
-CREATE INDEX idx_jamabandi_cache_expires ON jamabandi_cache (expires_at);
+CREATE INDEX IF NOT EXISTS idx_jamabandi_cache_lookup ON jamabandi_cache (tehsil, village, khasra_number);
+CREATE INDEX IF NOT EXISTS idx_jamabandi_cache_expires ON jamabandi_cache (expires_at);
 
 -- ---------------------------------------------------------------------------
 -- 7. zoning_data
@@ -198,7 +214,7 @@ CREATE TABLE IF NOT EXISTS zoning_data (
     UNIQUE(sector, land_use)
 );
 
-CREATE UNIQUE INDEX idx_zoning_data_slug ON zoning_data (slug);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_zoning_data_slug ON zoning_data (slug);
 
 -- ---------------------------------------------------------------------------
 -- 8. colony_approvals
@@ -221,15 +237,14 @@ CREATE TABLE IF NOT EXISTS colony_approvals (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Unique constraint that handles NULL licence_number correctly
-CREATE UNIQUE INDEX idx_colony_approvals_unique_with_licence
+CREATE UNIQUE INDEX IF NOT EXISTS idx_colony_approvals_unique_with_licence
     ON colony_approvals (colony_name, licence_number)
     WHERE licence_number IS NOT NULL;
-CREATE UNIQUE INDEX idx_colony_approvals_unique_no_licence
+CREATE UNIQUE INDEX IF NOT EXISTS idx_colony_approvals_unique_no_licence
     ON colony_approvals (colony_name)
     WHERE licence_number IS NULL;
 
-CREATE INDEX idx_colony_approvals_sector ON colony_approvals (sector);
+CREATE INDEX IF NOT EXISTS idx_colony_approvals_sector ON colony_approvals (sector);
 
 -- ---------------------------------------------------------------------------
 -- 9. gazette_notifications
@@ -253,17 +268,16 @@ CREATE TABLE IF NOT EXISTS gazette_notifications (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Unique constraint that handles NULL notification_number
-CREATE UNIQUE INDEX idx_gazette_unique_with_number
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gazette_unique_with_number
     ON gazette_notifications (notification_number, notification_date)
     WHERE notification_number IS NOT NULL;
-CREATE UNIQUE INDEX idx_gazette_unique_no_number
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gazette_unique_no_number
     ON gazette_notifications (title, notification_date)
     WHERE notification_number IS NULL;
 
-CREATE INDEX idx_gazette_notifications_date ON gazette_notifications (notification_date DESC);
-CREATE INDEX idx_gazette_notifications_type ON gazette_notifications (notification_type);
-CREATE INDEX idx_gazette_notifications_tags ON gazette_notifications USING GIN (relevance_tags);
+CREATE INDEX IF NOT EXISTS idx_gazette_notifications_date ON gazette_notifications (notification_date DESC);
+CREATE INDEX IF NOT EXISTS idx_gazette_notifications_type ON gazette_notifications (notification_type);
+CREATE INDEX IF NOT EXISTS idx_gazette_notifications_tags ON gazette_notifications USING GIN (relevance_tags);
 
 -- ---------------------------------------------------------------------------
 -- 10. rera_complaints
@@ -290,9 +304,9 @@ CREATE TABLE IF NOT EXISTS rera_complaints (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_rera_complaints_builder_slug ON rera_complaints (builder_slug);
-CREATE INDEX idx_rera_complaints_rera_number ON rera_complaints (rera_number);
-CREATE INDEX idx_rera_complaints_order_date ON rera_complaints (order_date DESC);
+CREATE INDEX IF NOT EXISTS idx_rera_complaints_builder_slug ON rera_complaints (builder_slug);
+CREATE INDEX IF NOT EXISTS idx_rera_complaints_rera_number ON rera_complaints (rera_number);
+CREATE INDEX IF NOT EXISTS idx_rera_complaints_order_date ON rera_complaints (order_date DESC);
 
 -- ---------------------------------------------------------------------------
 -- 11. court_auctions
@@ -320,8 +334,8 @@ CREATE TABLE IF NOT EXISTS court_auctions (
     UNIQUE(case_number, auction_date)
 );
 
-CREATE INDEX idx_court_auctions_city_active ON court_auctions (city, is_active);
-CREATE INDEX idx_court_auctions_auction_date ON court_auctions (auction_date DESC) WHERE is_active;
+CREATE INDEX IF NOT EXISTS idx_court_auctions_city_active ON court_auctions (city, is_active);
+CREATE INDEX IF NOT EXISTS idx_court_auctions_auction_date ON court_auctions (auction_date DESC) WHERE is_active;
 
 -- ---------------------------------------------------------------------------
 -- 12. neighbourhood_scores
@@ -349,7 +363,7 @@ CREATE TABLE IF NOT EXISTS neighbourhood_scores (
     UNIQUE(listing_id)
 );
 
-CREATE INDEX idx_neighbourhood_scores_stale ON neighbourhood_scores (stale_after);
+CREATE INDEX IF NOT EXISTS idx_neighbourhood_scores_stale ON neighbourhood_scores (stale_after);
 
 -- ---------------------------------------------------------------------------
 -- 13. scraper_runs
@@ -370,54 +384,87 @@ CREATE TABLE IF NOT EXISTS scraper_runs (
     metadata JSONB  -- scraper-specific stats
 );
 
-CREATE INDEX idx_scraper_runs_name_started ON scraper_runs (scraper_name, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_scraper_runs_name_started ON scraper_runs (scraper_name, started_at DESC);
 
 -- ---------------------------------------------------------------------------
 -- Auto-update updated_at on record changes
 -- (update_updated_at_column() function exists from initial schema migration)
 -- ---------------------------------------------------------------------------
-CREATE TRIGGER update_circle_rates_updated_at
-    BEFORE UPDATE ON circle_rates
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$ BEGIN
+    CREATE TRIGGER update_circle_rates_updated_at
+        BEFORE UPDATE ON circle_rates
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TRIGGER update_rera_projects_updated_at
-    BEFORE UPDATE ON rera_projects
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$ BEGIN
+    CREATE TRIGGER update_rera_projects_updated_at
+        BEFORE UPDATE ON rera_projects
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TRIGGER update_bank_auctions_updated_at
-    BEFORE UPDATE ON bank_auctions
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$ BEGIN
+    CREATE TRIGGER update_bank_auctions_updated_at
+        BEFORE UPDATE ON bank_auctions
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TRIGGER update_auction_alerts_updated_at
-    BEFORE UPDATE ON auction_alerts
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$ BEGIN
+    CREATE TRIGGER update_auction_alerts_updated_at
+        BEFORE UPDATE ON auction_alerts
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TRIGGER update_bank_rates_updated_at
-    BEFORE UPDATE ON bank_rates
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$ BEGIN
+    CREATE TRIGGER update_bank_rates_updated_at
+        BEFORE UPDATE ON bank_rates
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TRIGGER update_zoning_data_updated_at
-    BEFORE UPDATE ON zoning_data
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$ BEGIN
+    CREATE TRIGGER update_zoning_data_updated_at
+        BEFORE UPDATE ON zoning_data
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TRIGGER update_colony_approvals_updated_at
-    BEFORE UPDATE ON colony_approvals
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$ BEGIN
+    CREATE TRIGGER update_colony_approvals_updated_at
+        BEFORE UPDATE ON colony_approvals
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TRIGGER update_gazette_notifications_updated_at
-    BEFORE UPDATE ON gazette_notifications
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$ BEGIN
+    CREATE TRIGGER update_gazette_notifications_updated_at
+        BEFORE UPDATE ON gazette_notifications
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TRIGGER update_rera_complaints_updated_at
-    BEFORE UPDATE ON rera_complaints
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$ BEGIN
+    CREATE TRIGGER update_rera_complaints_updated_at
+        BEFORE UPDATE ON rera_complaints
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TRIGGER update_court_auctions_updated_at
-    BEFORE UPDATE ON court_auctions
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$ BEGIN
+    CREATE TRIGGER update_court_auctions_updated_at
+        BEFORE UPDATE ON court_auctions
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TRIGGER update_neighbourhood_scores_updated_at
-    BEFORE UPDATE ON neighbourhood_scores
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$ BEGIN
+    CREATE TRIGGER update_neighbourhood_scores_updated_at
+        BEFORE UPDATE ON neighbourhood_scores
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 COMMIT;

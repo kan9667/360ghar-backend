@@ -77,6 +77,8 @@ from .pm_tenants import RentalApplication, RentalApplicationForm
 from .properties import Amenity, Property, PropertyAmenity, PropertyImage, Visit
 from .social import (
     AppCatalog,
+    FlatmateProfileViewEvent,
+    FlatmateSuperLikeUsage,
     MatchQnAAnswer,
     UserBlock,
     UserConversation,
@@ -107,34 +109,28 @@ __all__ = [
     "User",
     "UserSearchHistory",
     "UserSwipe",
-
     # Agents
     "Agent",
     "AgentInteraction",
-
     # Bookings
     "Booking",
-
     # Core
     "BugReport",
     "Page",
     "AppVersion",
     "FAQ",
-
     # Properties
     "Property",
     "PropertyImage",
     "Amenity",
     "PropertyAmenity",
     "Visit",
-
     # Blogs
     "BlogCategory",
     "BlogTag",
     "BlogPost",
     "BlogPostCategory",
     "BlogPostTag",
-
     # Property Management
     "Document",
     "RentalApplicationForm",
@@ -145,7 +141,6 @@ __all__ = [
     "Expense",
     "MaintenanceRequest",
     "InspectionChecklist",
-
     # 360 Virtual Tours
     "Tour",
     "Scene",
@@ -161,20 +156,19 @@ __all__ = [
     "TourBranding",
     "CustomDomain",
     "VideoMetadata",
-
     # AI Conversations
     "AIConversation",
     "AIConversationMessage",
-
     # Shared social primitives
     "UserMatch",
     "UserConversation",
     "UserMessage",
+    "FlatmateSuperLikeUsage",
     "UserBlock",
     "UserReport",
     "AppCatalog",
     "MatchQnAAnswer",
-
+    "FlatmateProfileViewEvent",
     # Data Hub
     "CircleRate",
     "ReraProject",
@@ -189,7 +183,6 @@ __all__ = [
     "CourtAuction",
     "NeighbourhoodScore",
     "ScraperRun",
-
     # Enums
     "AuctionSource",
     "BookingStatus",

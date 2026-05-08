@@ -10,17 +10,28 @@ from app.services.flatmates.conversations import (
     send_message,
 )
 from app.services.flatmates.helpers import geocode_listing
+from app.services.flatmates.interactions import (
+    record_profile_view_event,
+    record_society_tag_vote,
+)
 from app.services.flatmates.matching import (
+    list_incoming_likes,
     list_matches,
     record_swipe,
     unmatch_match,
     unmatch_user_pair,
 )
 from app.services.flatmates.moderation import (
+    apply_expired_move_in_pause,
+    apply_listing_prescreen_metadata,
+    apply_report_auto_pause,
+    build_listing_prescreen_result,
     create_block,
     create_report,
     delete_block,
     list_blocks,
+    pause_expired_flatmate_listings,
+    prescreen_flatmate_listing,
 )
 from app.services.flatmates.profiles import (
     get_bootstrap,
@@ -46,6 +57,7 @@ __all__ = [
     "get_bootstrap",
     # matching
     "record_swipe",
+    "list_incoming_likes",
     "list_matches",
     "unmatch_user_pair",
     "unmatch_match",
@@ -55,11 +67,20 @@ __all__ = [
     "list_conversations",
     "list_messages",
     "send_message",
+    # interactions
+    "record_profile_view_event",
+    "record_society_tag_vote",
     # moderation
     "create_block",
     "delete_block",
     "list_blocks",
     "create_report",
+    "build_listing_prescreen_result",
+    "apply_expired_move_in_pause",
+    "apply_listing_prescreen_metadata",
+    "apply_report_auto_pause",
+    "pause_expired_flatmate_listings",
+    "prescreen_flatmate_listing",
     # visits
     "update_visit_status",
     # helpers

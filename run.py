@@ -24,7 +24,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
-    port_str = os.getenv("PORT", "8000")
+    port_str = os.getenv("PORT", "3600")
 
     logger.info(f"Starting Container - PORT: {port_str}")
 
@@ -32,8 +32,8 @@ if __name__ == "__main__":
     try:
         port = int(port_str)
     except (ValueError, TypeError):
-        logger.warning(f"Invalid PORT value '{port_str}', falling back to 8000")
-        port = 8000
+        logger.warning(f"Invalid PORT value '{port_str}', falling back to 3600")
+        port = 3600
 
     environment = os.getenv("ENVIRONMENT", "development")
     reload = environment == "development"

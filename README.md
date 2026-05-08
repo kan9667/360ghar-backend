@@ -244,7 +244,7 @@ All endpoints are prefixed with `/api/v1`.
    uv run python run.py
 
    # Or using FastAPI CLI with hot reload (recommended for development)
-   uv run fastapi dev app/main.py --port 8000 --host 0.0.0.0
+   uv run fastapi dev app/main.py --port 3600 --host 0.0.0.0
    ```
 
    **If using pip (with activated virtual environment):**
@@ -253,10 +253,10 @@ All endpoints are prefixed with `/api/v1`.
    python run.py
 
    # Or using FastAPI CLI with hot reload (recommended for development)
-   fastapi dev app/main.py --port 8000 --host 0.0.0.0
+   fastapi dev app/main.py --port 3600 --host 0.0.0.0
    ```
 
-The API will be available at `http://localhost:8000`.
+The API will be available at `http://localhost:3600`.
 
 > **💡 Development Tip**: FastAPI CLI provides better hot reload performance and additional development features. It's the recommended way for active development.
 
@@ -374,13 +374,13 @@ The service creates a `property_embeddings` table (pgvector) and tracks incremen
 
 Once running, access the interactive API documentation:
 
-- **Swagger UI**: [http://localhost:8000/api/v1/docs](http://localhost:8000/api/v1/docs)
-- **ReDoc**: [http://localhost:8000/api/v1/redoc](http://localhost:8000/api/v1/redoc)
-- **OpenAPI YAML**: [http://localhost:8000/api/v1/openapi.yaml](http://localhost:8000/api/v1/openapi.yaml)
+- **Swagger UI**: [http://localhost:3600/api/v1/docs](http://localhost:3600/api/v1/docs)
+- **ReDoc**: [http://localhost:3600/api/v1/redoc](http://localhost:3600/api/v1/redoc)
+- **OpenAPI YAML**: [http://localhost:3600/api/v1/openapi.yaml](http://localhost:3600/api/v1/openapi.yaml)
 
 Additional endpoints:
-- **Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
-- **Config Info**: [http://localhost:8000/config](http://localhost:8000/config)
+- **Health Check**: [http://localhost:3600/health](http://localhost:3600/health)
+- **Config Info**: [http://localhost:3600/config](http://localhost:3600/config)
 
 ### Notifications API
 

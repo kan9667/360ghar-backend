@@ -72,10 +72,14 @@ def _on_checkin(dbapi_conn, connection_record):
     if start is not None:
         elapsed = time.monotonic() - start
         if elapsed > _SLOW_CHECKOUT_THRESHOLD_S:
+            pool = connection_record.pool
             logger.warning(
-                "Slow pool checkout: %.1fs (pool: %s)",
+                "Slow pool checkout: %.1fs (pool: %s, size: %d, checkedout: %d, overflow: %d)",
                 elapsed,
                 connection_record.info.get("pool_label", "unknown"),
+                pool.size(),
+                pool.checkedout(),
+                pool.overflow(),
             )
 
 

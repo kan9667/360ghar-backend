@@ -29,6 +29,11 @@ def extract_db_error_code(exc: Exception) -> str | None:
     return match.group(1) if match else None
 
 
+def _is_pool_exhaustion_error(exc: Exception) -> bool:
+    """Pool exhaustion is a capacity problem — retrying makes it worse."""
+    return "QueuePool limit" in str(exc) or "3o7r" in str(exc)
+
+
 def is_transient_db_error(exc: Exception) -> bool:
     if isinstance(exc, (DisconnectionError, SATimeoutError)):
         return True
@@ -67,6 +72,17 @@ async def execute_with_transient_retry(
             raise
 
         error_code = extract_db_error_code(exc) or "UNKNOWN_TRANSIENT_DB_ERROR"
+
+        # Pool exhaustion is a capacity problem — retrying holds the session
+        # open and queues another checkout, making it worse. Fail fast instead.
+        if _is_pool_exhaustion_error(exc):
+            logger.error(
+                "Pool exhaustion detected; skipping retry to reduce pressure",
+                extra={"operation": operation_name, "error_code": error_code},
+                exc_info=True,
+            )
+            raise
+
         logger.warning(
             "Transient DB error detected; retrying once",
             extra={"operation": operation_name, "error_code": error_code, "attempt": 1},

@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from app.models.enums import (
     ConversationSource,
@@ -24,6 +24,7 @@ class DiscoverProfilesQuery(BaseModel):
     city: str | None = None
     budget_min: int | None = Field(default=None, ge=0)
     budget_max: int | None = Field(default=None, ge=0)
+    move_in: str | None = None
     limit: int = Field(default=20, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
 
@@ -119,6 +120,21 @@ class FlatmatesPeer(BaseModel):
     locality: str | None = None
     age: int | None = None
     profession: str | None = None
+    bio: str | None = None
+    budget_min: float | None = None
+    budget_max: float | None = None
+    move_in_timeline: str | None = None
+    sleep_schedule: str | None = None
+    cleanliness: str | None = None
+    food_habits: str | None = None
+    smoking_drinking: str | None = None
+    guests_policy: str | None = None
+    work_style: str | None = None
+    gender: str | None = None
+    gender_preference: str | None = None
+    non_negotiables: list[str] = Field(default_factory=list)
+    has_pets: bool = False
+    party_habit: str | None = None
     match_percentage: float | None = None
     phone_number: str | None = None
 
@@ -136,6 +152,19 @@ class ConversationPropertyContext(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ConversationQnAAnswer(BaseModel):
+    user_id: int
+    q1: str | None = None
+    q2: str | None = None
+    q3: str | None = None
+
+
+class ConversationQnAState(BaseModel):
+    current_user: ConversationQnAAnswer | None = None
+    peer: ConversationQnAAnswer | None = None
+    both_answered: bool = False
+
+
 class ConversationSummary(BaseModel):
     id: int
     source: ConversationSource
@@ -146,12 +175,14 @@ class ConversationSummary(BaseModel):
     last_message_at: datetime | None = None
     unread_count: int = 0
     matched_at: datetime | None = None
+    qna: ConversationQnAState | None = None
 
 
 class MessageCreate(BaseModel):
     body: str | None = None
     attachment_url: str | None = None
     message_type: MessageType = MessageType.text
+    metadata: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def validate_content(self):
@@ -167,15 +198,27 @@ class MessageOut(BaseModel):
     body: str | None = None
     attachment_url: str | None = None
     message_type: MessageType
+    metadata: dict[str, Any] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("metadata", "message_metadata"),
+        serialization_alias="metadata",
+    )
     read_at: datetime | None = None
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class MatchSummary(BaseModel):
     id: int
     status: UserMatchStatus
+    peer: FlatmatesPeer
+    context_property: ConversationPropertyContext | None = None
+    created_at: datetime
+
+
+class IncomingLikeSummary(BaseModel):
+    id: int
     peer: FlatmatesPeer
     context_property: ConversationPropertyContext | None = None
     created_at: datetime
@@ -204,6 +247,41 @@ class SwipeResult(BaseModel):
     conversation_id: int | None = None
     match_id: int | None = None
     did_match: bool = False
+
+
+class ProfileViewEventCreate(BaseModel):
+    target_user_id: int = Field(gt=0)
+    context_property_id: int | None = Field(default=None, gt=0)
+    duration_seconds: int = Field(ge=0, le=60 * 60)
+    scroll_depth_percent: int | None = Field(default=None, ge=0, le=100)
+    source: str = Field(default="swipe_deck", min_length=1, max_length=64)
+
+
+class ProfileViewEventOut(BaseModel):
+    id: int
+    viewer_user_id: int
+    viewed_user_id: int
+    context_property_id: int | None = None
+    source: str
+    duration_seconds: int
+    scroll_depth_percent: int | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SocietyTagVoteCreate(BaseModel):
+    tag: str = Field(min_length=1, max_length=80)
+    vote: Literal["up", "down"]
+
+
+class SocietyTagVoteOut(BaseModel):
+    property_id: int
+    tag: str
+    current_vote: Literal["up", "down"]
+    upvotes: int
+    downvotes: int
+    disputed: bool = False
 
 
 class ReportCreate(BaseModel):

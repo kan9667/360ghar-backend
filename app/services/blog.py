@@ -2,7 +2,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.orm import selectinload
 from typing import Optional, List, Tuple
+from app.core.config import settings
 from app.core.db_resilience import execute_with_transient_retry
+from app.core.cache import cached, CacheKeyPatterns
 from app.core.logging import get_logger
 from app.core.exceptions import (
     ForbiddenException, NotFoundException, ConflictException,
@@ -152,6 +154,15 @@ async def get_blog_post(
     if not post:
         return None
     return BlogPostSchema.model_validate(post)
+
+
+@cached("blog:post", ttl=settings.CACHE_TTL_BLOG_POSTS, key_params=["identifier"])
+async def get_blog_post_cached(
+    db: AsyncSession,
+    identifier: str,
+) -> Optional["app.schemas.blog.BlogPost"]:
+    """Cached wrapper — only caches active posts (include_inactive=False)."""
+    return await get_blog_post(db, identifier, include_inactive=False)
 
 
 async def list_blog_posts(

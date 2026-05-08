@@ -353,12 +353,12 @@ Dev dependencies (pytest, ruff, mypy) are in the `dev` optional group: `uv sync 
 ## API Documentation
 
 When running locally:
-- Swagger UI: http://localhost:8000/api/v1/docs
-- ReDoc: http://localhost:8000/api/v1/redoc
-- OpenAPI YAML: http://localhost:8000/api/v1/openapi.yaml
-- Health: http://localhost:8000/health
-- WebSocket (AI jobs): `ws://localhost:8000/ws/jobs/{job_id}?token=...`
-- WebSocket (notifications): `ws://localhost:8000/ws/notifications?token=...`
+- Swagger UI: http://localhost:3600/api/v1/docs
+- ReDoc: http://localhost:3600/api/v1/redoc
+- OpenAPI YAML: http://localhost:3600/api/v1/openapi.yaml
+- Health: http://localhost:3600/health
+- WebSocket (AI jobs): `ws://localhost:3600/ws/jobs/{job_id}?token=...`
+- WebSocket (notifications): `ws://localhost:3600/ws/notifications?token=...`
 - AI Agent chat (auth): `POST /api/v1/agent/chat`
 - AI Agent chat (guest): `POST /api/v1/agent/chat-public`
 

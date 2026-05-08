@@ -1,6 +1,7 @@
 """Unified property search with comprehensive filtering and geospatial optimization."""
 
 import json
+from datetime import datetime, timedelta, timezone
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -44,11 +45,81 @@ TEXT_WEIGHT = 0.4
 logger = get_logger(__name__)
 
 
+def _utc_day_start(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    value = value.astimezone(timezone.utc)
+    return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+
+
+def _next_month_start(value: datetime) -> datetime:
+    month = value.month + 1
+    year = value.year
+    if month == 13:
+        month = 1
+        year += 1
+    return datetime(year, month, 1, tzinfo=timezone.utc)
+
+
+def _normalize_move_in_filter(move_in: str | None) -> str | None:
+    if move_in is None:
+        return None
+    value = move_in.strip().lower().replace("-", "_")
+    if value in {"", "all", "any", "anytime", "flexible", "just_exploring"}:
+        return None
+    if value in {"immediate", "immediately", "now"}:
+        return "immediate"
+    if value in {"this_month", "within_1_month", "within_a_month"}:
+        return "this_month"
+    if value == "next_month":
+        return "next_month"
+    if value in {"within_2_weeks", "two_weeks"}:
+        return "within_2_weeks"
+    return None
+
+
+def _move_in_window(
+    move_in: str | None,
+    *,
+    now: datetime | None = None,
+) -> tuple[datetime | None, datetime] | None:
+    normalized = _normalize_move_in_filter(move_in)
+    if normalized is None:
+        return None
+
+    today = _utc_day_start(now or datetime.now(timezone.utc))
+    if normalized == "immediate":
+        return None, today + timedelta(days=8)
+    if normalized == "within_2_weeks":
+        return None, today + timedelta(days=15)
+    if normalized == "this_month":
+        return None, _next_month_start(today)
+    if normalized == "next_month":
+        start = _next_month_start(today)
+        return start, _next_month_start(start)
+    return None
+
+
+def _available_from_minimum(available_from: str | None) -> datetime | None:
+    if available_from is None or not available_from.strip():
+        return None
+    try:
+        return _utc_day_start(datetime.fromisoformat(available_from.strip()))
+    except ValueError:
+        return None
+
+
 async def get_unified_properties_optimized(
     db: AsyncSession, filters: UnifiedPropertyFilter, user_id: int | None, page: int, limit: int
 ):
     """Unified property search with comprehensive filtering and geospatial optimization."""
-    logger.info("Searching properties for user %s, page %s, limit %s, filters: %s", user_id, page, limit, filters)
+    logger.info(
+        "Searching properties for user %s, page %s, limit %s, filters: %s",
+        user_id,
+        page,
+        limit,
+        filters,
+    )
 
     try:
         cache_filters = filters.model_dump(exclude_none=True, mode="json")
@@ -104,7 +175,12 @@ async def get_unified_properties_optimized(
         user_location = None
         distance = None
         if filters.latitude is not None and filters.longitude is not None and filters.radius_km:
-            logger.debug("Adding location filter: %s, %s, radius: %skm", filters.latitude, filters.longitude, filters.radius_km)
+            logger.debug(
+                "Adding location filter: %s, %s, radius: %skm",
+                filters.latitude,
+                filters.longitude,
+                filters.radius_km,
+            )
 
             # Create a point from the user's location, ensuring SRID is set
             user_location = func.ST_SetSRID(
@@ -278,6 +354,21 @@ async def get_unified_properties_optimized(
                 listing_preferences_json["sharing_type"].astext == filters.sharing_type.value
             )
 
+        available_from_min = _available_from_minimum(filters.available_from)
+        if available_from_min is not None:
+            logger.debug("Adding available-from lower-bound filter: %s", available_from_min)
+            conditions.append(Property.available_from.is_not(None))
+            conditions.append(Property.available_from >= available_from_min)
+
+        move_in_window = _move_in_window(filters.move_in)
+        if move_in_window is not None:
+            start, end = move_in_window
+            logger.debug("Adding move-in timeline filter: %s to %s", start, end)
+            conditions.append(Property.available_from.is_not(None))
+            if start is not None:
+                conditions.append(Property.available_from >= start)
+            conditions.append(Property.available_from < end)
+
         # Features filter - support both object and string-array JSON shapes.
         if filters.features:
             logger.debug("Adding features filter: %s", filters.features)
@@ -300,7 +391,11 @@ async def get_unified_properties_optimized(
 
             from app.models.bookings import Booking
 
-            logger.debug("Adding availability filter: %s to %s", filters.check_in_date, filters.check_out_date)
+            logger.debug(
+                "Adding availability filter: %s to %s",
+                filters.check_in_date,
+                filters.check_out_date,
+            )
 
             # Parse date strings if needed
             check_in = (
@@ -359,7 +454,9 @@ async def get_unified_properties_optimized(
                     )
             except Exception as e:
                 semantic_enabled = False
-                logger.error("Semantic embedding generation failed, falling back to text search: %s", e)
+                logger.error(
+                    "Semantic embedding generation failed, falling back to text search: %s", e
+                )
 
         if search_query_obj is not None and not text_filter_applied and not semantic_enabled:
             conditions.append(search_vector.op("@@")(search_query_obj))

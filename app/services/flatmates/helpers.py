@@ -13,6 +13,7 @@ from app.models.enums import FlatmatesProfileStatus, UserMatchStatus
 from app.models.properties import Property
 from app.models.social import UserBlock, UserMatch
 from app.models.users import User
+from app.utils.geo import wkt_point
 
 logger = get_logger(__name__)
 
@@ -56,6 +57,13 @@ def _profile_gender(prefs: dict[str, Any]) -> str | None:
 def _profile_gender_preference(prefs: dict[str, Any]) -> str | None:
     raw = prefs.get("gender_preference")
     return str(raw).strip() if raw is not None and str(raw).strip() else None
+
+
+def _profile_non_negotiables(prefs: dict[str, Any]) -> list[str]:
+    raw = prefs.get("non_negotiables")
+    if not isinstance(raw, list):
+        return []
+    return [str(value) for value in raw if str(value).strip()]
 
 
 def _compatibility_percentage(current_user: User | None, peer: User) -> float | None:
@@ -127,6 +135,24 @@ def _build_peer_payload(user: User, current_user: User | None = None) -> dict[st
         "locality": user.flatmates_locality,
         "age": _profile_age(user, prefs),
         "profession": _profile_profession(prefs),
+        "bio": user.flatmates_bio,
+        "budget_min": user.flatmates_budget_min,
+        "budget_max": user.flatmates_budget_max,
+        "move_in_timeline": user.flatmates_move_in_timeline,
+        "sleep_schedule": user.flatmates_sleep_schedule,
+        "cleanliness": user.flatmates_cleanliness,
+        "food_habits": user.flatmates_food_habits,
+        "smoking_drinking": user.flatmates_smoking_drinking,
+        "guests_policy": user.flatmates_guests_policy,
+        "work_style": user.flatmates_work_style,
+        "gender": _profile_gender(prefs),
+        "gender_preference": _profile_gender_preference(prefs),
+        "non_negotiables": _profile_non_negotiables(prefs),
+        "has_pets": str(prefs.get("pets", "")).strip().lower()
+        in {"have_pets", "has_pets", "yes", "true"},
+        "party_habit": (
+            str(prefs["parties_at_home"]) if prefs.get("parties_at_home") is not None else None
+        ),
         "match_percentage": _compatibility_percentage(current_user, user),
         "phone_number": user.phone,
     }
@@ -239,7 +265,12 @@ async def geocode_listing(db: AsyncSession, property_id: int) -> None:
 
     stmt = select(Property).where(Property.id == property_id)
     prop = (await db.execute(stmt)).scalar_one_or_none()
-    if prop is None or prop.latitude is not None:
+    if prop is None:
+        return
+    if prop.latitude is not None and prop.longitude is not None:
+        if prop.location is None:
+            prop.location = wkt_point(prop.longitude, prop.latitude)
+            await db.flush()
         return
 
     address_parts = [prop.full_address, prop.locality, prop.city, prop.state]
@@ -254,12 +285,14 @@ async def geocode_listing(db: AsyncSession, property_id: int) -> None:
             resp = await client.get(
                 "https://maps.googleapis.com/maps/api/geocode/json",
                 params={"address": address, "key": api_key},
+                timeout=10,
             )
             data = resp.json()
             if data.get("results"):
                 loc = data["results"][0]["geometry"]["location"]
                 prop.latitude = loc["lat"]
                 prop.longitude = loc["lng"]
+                prop.location = wkt_point(prop.longitude, prop.latitude)
                 await db.flush()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Property geocoding failed (best-effort): %s", exc, exc_info=True)

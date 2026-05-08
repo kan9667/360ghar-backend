@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
+from app.core.cache import cached, invalidate_cache, CacheKeyPatterns
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.db_resilience import extract_db_error_code, is_transient_db_error
-from app.core.config import settings
-from app.core.cache import cached, invalidate_cache, CacheKeyPatterns
 from app.core.exceptions import ServiceUnavailableException
 from app.core.logging import get_logger
 from app.api.api_v1.dependencies.auth import get_current_active_user, get_current_user_optional
@@ -17,7 +17,7 @@ from app.schemas.blog import (
     BlogGenerateFromTopicRequest, BlogGenerateBulkRequest, BlogGenerationResult
 )
 from app.services.blog import (
-    create_blog_post, get_blog_post, list_blog_posts, update_blog_post, delete_blog_post,
+    create_blog_post, get_blog_post, get_blog_post_cached, list_blog_posts, update_blog_post, delete_blog_post,
     create_category, get_category, list_categories, update_category, delete_category,
     create_tag, get_tag, list_tags, update_tag, delete_tag
 )
@@ -28,6 +28,19 @@ logger = get_logger(__name__)
 
 
 # Cached helper functions for reference data
+@cached("blog:posts", ttl=settings.CACHE_TTL_BLOG_POSTS)
+async def list_posts_cached(
+    db: AsyncSession,
+    q: Optional[str],
+    categories: Optional[List[str]],
+    tags: Optional[List[str]],
+    page: int,
+    limit: int,
+):
+    """Cached version of list_blog_posts for public (non-admin) traffic."""
+    return await list_blog_posts(db, q=q, categories=categories, tags=tags, page=page, limit=limit, include_inactive=False)
+
+
 @cached("blog:categories", ttl=settings.CACHE_TTL_BLOG_CATEGORIES)
 async def get_categories_cached(db: AsyncSession, page: int, limit: int):
     """Cached version of list_categories."""
@@ -41,6 +54,7 @@ async def get_tags_cached(db: AsyncSession, page: int, limit: int):
 
 
 @router.post("/posts", response_model=BlogPost)
+@invalidate_cache([CacheKeyPatterns.BLOG_POSTS])
 async def create_post(
     payload: BlogPostCreate,
     db: AsyncSession = Depends(get_db),
@@ -71,15 +85,25 @@ async def list_posts(
     try:
         all_tags = (tags or []) + (keywords or [])
         is_admin = bool(current_user and getattr(current_user, "role", None) == UserRole.admin.value)
-        items, total = await list_blog_posts(
-            db,
-            q=q,
-            categories=categories,
-            tags=all_tags,
-            page=page,
-            limit=limit,
-            include_inactive=is_admin,
-        )
+        if is_admin:
+            items, total = await list_blog_posts(
+                db,
+                q=q,
+                categories=categories,
+                tags=all_tags,
+                page=page,
+                limit=limit,
+                include_inactive=True,
+            )
+        else:
+            items, total = await list_posts_cached(
+                db,
+                q=q,
+                categories=categories,
+                tags=all_tags,
+                page=page,
+                limit=limit,
+            )
         total_pages = (total + limit - 1) // limit
         return {
             "items": items,
@@ -114,13 +138,34 @@ async def get_post(
 ):
     """Get a specific blog post by ID or slug. Public endpoint."""
     is_admin = bool(current_user and getattr(current_user, "role", None) == UserRole.admin.value)
-    post = await get_blog_post(db, identifier, include_inactive=is_admin)
-    if not post:
-        raise HTTPException(status_code=404, detail="Blog post not found")
-    return post
+    try:
+        if is_admin:
+            post = await get_blog_post(db, identifier, include_inactive=True)
+        else:
+            post = await get_blog_post_cached(db, identifier=identifier)
+        if not post:
+            raise HTTPException(status_code=404, detail="Blog post not found")
+        return post
+    except HTTPException:
+        raise
+    except Exception as e:
+        if is_transient_db_error(e):
+            error_code = extract_db_error_code(e) or "TRANSIENT_DB_ERROR"
+            logger.error(
+                "Blog get transient DB failure",
+                extra={"endpoint": "get_post", "error_code": error_code},
+                exc_info=True,
+            )
+            raise ServiceUnavailableException(
+                detail="Blog post is temporarily unavailable. Please retry shortly.",
+                details={"error_code": error_code, "endpoint": "get_post"},
+            ) from e
+        logger.error("Error in get_post: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error. Please try again later.") from e
 
 
 @router.put("/posts/{identifier}", response_model=BlogPost)
+@invalidate_cache([CacheKeyPatterns.BLOG_POSTS])
 async def update_post(
     identifier: str,
     payload: BlogPostUpdate,
@@ -138,6 +183,7 @@ async def update_post(
 
 
 @router.delete("/posts/{identifier}")
+@invalidate_cache([CacheKeyPatterns.BLOG_POSTS])
 async def delete_post(
     identifier: str,
     db: AsyncSession = Depends(get_db),

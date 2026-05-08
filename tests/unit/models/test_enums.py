@@ -2,54 +2,52 @@
 Tests for app.models.enums module.
 """
 
-import pytest
-
 from app.models.enums import (
-    PropertyType,
-    PropertyPurpose,
-    PropertyStatus,
-    BookingStatus,
-    PaymentStatus,
-    VisitStatus,
-    ListingGenderPreference,
-    ListingSharingType,
-    FlatmatesMode,
-    FlatmatesProfileStatus,
-    SwipeTargetType,
-    SwipeAction,
-    VisitContext,
-    ConversationSource,
-    ConversationStatus,
-    UserMatchStatus,
-    MessageType,
-    UserReportReason,
-    UserReportStatus,
     AgentType,
-    ExperienceLevel,
-    BugType,
+    AuctionSource,
+    BookingStatus,
     BugSeverity,
     BugStatus,
-    PageFormat,
-    ImageCategory,
-    UserRole,
-    ManagedPropertyStatus,
-    TenantStatus,
-    LeaseStatus,
-    RentChargeStatus,
+    BugType,
+    ComplaintNature,
+    ConversationSource,
+    ConversationStatus,
+    DocumentType,
     ExpenseCategory,
-    MaintenanceUrgency,
+    ExperienceLevel,
+    FlatmatesMode,
+    FlatmatesProfileStatus,
+    GazetteType,
+    HotspotType,
+    ImageCategory,
+    InspectionType,
+    LeaseStatus,
+    ListingGenderPreference,
+    ListingSharingType,
     MaintenanceCategory,
     MaintenanceRequestStatus,
-    WorkOrderStatus,
-    DocumentType,
-    InspectionType,
+    MaintenanceUrgency,
+    ManagedPropertyStatus,
+    MessageType,
+    PageFormat,
+    PaymentStatus,
+    PropertyPurpose,
+    PropertyStatus,
+    PropertyType,
+    RentChargeStatus,
+    ScraperStatus,
+    SwipeAction,
+    SwipeTargetType,
+    TenantStatus,
     TourStatus,
     TourVisibility,
-    HotspotType,
-    ScraperStatus,
-    AuctionSource,
-    GazetteType,
-    ComplaintNature,
+    UserMatchStatus,
+    UserReportReason,
+    UserReportStatus,
+    UserRole,
+    VisitContext,
+    VisitStatus,
+    WorkOrderStatus,
 )
 
 
@@ -230,9 +228,18 @@ class TestImageCategory:
     def test_all_image_categories(self):
         """Test all image categories are defined."""
         categories = [
-            "room", "hall", "kitchen", "bathroom", "balcony",
-            "terrace", "garden", "parking", "entrance",
-            "exterior", "interior", "others"
+            "room",
+            "hall",
+            "kitchen",
+            "bathroom",
+            "balcony",
+            "terrace",
+            "garden",
+            "parking",
+            "entrance",
+            "exterior",
+            "interior",
+            "others",
         ]
         for cat in categories:
             assert hasattr(ImageCategory, cat)
@@ -292,8 +299,15 @@ class TestExpenseCategory:
     def test_all_expense_categories(self):
         """Test all expense categories are defined."""
         categories = [
-            "maintenance", "repairs", "insurance", "property_tax",
-            "hoa", "utilities", "marketing", "legal", "other"
+            "maintenance",
+            "repairs",
+            "insurance",
+            "property_tax",
+            "hoa",
+            "utilities",
+            "marketing",
+            "legal",
+            "other",
         ]
         for cat in categories:
             assert hasattr(ExpenseCategory, cat)
@@ -312,8 +326,14 @@ class TestMaintenanceEnums:
     def test_maintenance_category(self):
         """Test MaintenanceCategory values."""
         categories = [
-            "plumbing", "electrical", "hvac", "appliance",
-            "structural", "pest_control", "cleaning", "other"
+            "plumbing",
+            "electrical",
+            "hvac",
+            "appliance",
+            "structural",
+            "pest_control",
+            "cleaning",
+            "other",
         ]
         for cat in categories:
             assert hasattr(MaintenanceCategory, cat)
@@ -339,9 +359,16 @@ class TestDocumentType:
     def test_all_document_types(self):
         """Test all document types are defined."""
         doc_types = [
-            "lease_agreement", "id_proof", "address_proof", "income_proof",
-            "inspection_report", "receipt", "invoice", "property_deed",
-            "insurance_policy", "other"
+            "lease_agreement",
+            "id_proof",
+            "address_proof",
+            "income_proof",
+            "inspection_report",
+            "receipt",
+            "invoice",
+            "property_deed",
+            "insurance_policy",
+            "other",
         ]
         for doc_type in doc_types:
             assert hasattr(DocumentType, doc_type)
@@ -435,6 +462,7 @@ class TestFlatmatesEnums:
         assert MessageType.text.value == "text"
         assert MessageType.image.value == "image"
         assert MessageType.system.value == "system"
+        assert MessageType.visit_request.value == "visit_request"
 
     def test_user_report_reason_values(self):
         for reason in ["spam", "fake_profile", "abuse", "inappropriate", "other"]:

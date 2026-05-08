@@ -1,20 +1,25 @@
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.properties import Property
 
 
 class UserMatch(Base):
@@ -27,19 +32,19 @@ class UserMatch(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_one_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     user_two_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    context_property_id: Mapped[Optional[int]] = mapped_column(
+    context_property_id: Mapped[int | None] = mapped_column(
         ForeignKey("properties.id", ondelete="SET NULL"),
         nullable=True,
     )
     status: Mapped[str] = mapped_column(String(32), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         onupdate=func.now(),
         nullable=True,
     )
 
-    context_property: Mapped[Optional["Property"]] = relationship(
+    context_property: Mapped["Property | None"] = relationship(
         "Property",
         foreign_keys=[context_property_id],
     )
@@ -56,23 +61,23 @@ class UserConversation(Base):
     user_one_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     user_two_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    context_property_id: Mapped[Optional[int]] = mapped_column(
+    context_property_id: Mapped[int | None] = mapped_column(
         ForeignKey("properties.id", ondelete="SET NULL"),
         nullable=True,
     )
     source: Mapped[str] = mapped_column(String(32), default="listing_interest")
     status: Mapped[str] = mapped_column(String(32), default="active")
-    last_message_preview: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    last_message_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    context_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    last_message_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    context_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         onupdate=func.now(),
         nullable=True,
     )
 
-    context_property: Mapped[Optional["Property"]] = relationship(
+    context_property: Mapped["Property | None"] = relationship(
         "Property",
         foreign_keys=[context_property_id],
     )
@@ -96,18 +101,38 @@ class UserMessage(Base):
         ForeignKey("user_conversations.id", ondelete="CASCADE")
     )
     sender_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    attachment_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attachment_url: Mapped[str | None] = mapped_column(String, nullable=True)
     message_type: Mapped[str] = mapped_column(String(32), default="text")
-    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    message_metadata: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         onupdate=func.now(),
         nullable=True,
     )
 
     conversation: Mapped["UserConversation"] = relationship(back_populates="messages")
+
+
+class FlatmateSuperLikeUsage(Base):
+    __tablename__ = "flatmate_super_like_usage"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "target_user_id",
+            "used_on",
+            name="uq_flatmate_super_like_usage_target_day",
+        ),
+        Index("idx_flatmate_super_like_usage_user_day", "user_id", "used_on"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    target_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    used_on: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class UserBlock(Base):
@@ -132,23 +157,44 @@ class UserReport(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     reporter_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     reported_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    conversation_id: Mapped[Optional[int]] = mapped_column(
+    conversation_id: Mapped[int | None] = mapped_column(
         ForeignKey("user_conversations.id", ondelete="SET NULL"),
         nullable=True,
     )
-    property_id: Mapped[Optional[int]] = mapped_column(
+    property_id: Mapped[int | None] = mapped_column(
         ForeignKey("properties.id", ondelete="SET NULL"),
         nullable=True,
     )
     reason: Mapped[str] = mapped_column(String(32), default="other")
     status: Mapped[str] = mapped_column(String(32), default="open")
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         onupdate=func.now(),
         nullable=True,
     )
+
+
+class FlatmateProfileViewEvent(Base):
+    __tablename__ = "flatmate_profile_view_events"
+    __table_args__ = (
+        Index("idx_flatmate_profile_views_viewer", "viewer_user_id", "created_at"),
+        Index("idx_flatmate_profile_views_viewed", "viewed_user_id", "created_at"),
+        Index("idx_flatmate_profile_views_property", "context_property_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    viewer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    viewed_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    context_property_id: Mapped[int | None] = mapped_column(
+        ForeignKey("properties.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    source: Mapped[str] = mapped_column(String(64), default="swipe_deck")
+    duration_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    scroll_depth_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class AppCatalog(Base):
@@ -164,7 +210,7 @@ class AppCatalog(Base):
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         onupdate=func.now(),
         nullable=True,
@@ -173,14 +219,12 @@ class AppCatalog(Base):
 
 class MatchQnAAnswer(Base):
     __tablename__ = "match_qna_answers"
-    __table_args__ = (
-        Index("idx_match_qna_match", "match_id"),
-    )
+    __table_args__ = (Index("idx_match_qna_match", "match_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     match_id: Mapped[int] = mapped_column(ForeignKey("user_matches.id", ondelete="CASCADE"))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    q1: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    q2: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    q3: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    q1: Mapped[str | None] = mapped_column(Text, nullable=True)
+    q2: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    q3: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

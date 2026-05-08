@@ -25,7 +25,7 @@ from app.schemas.data_hub import (
 )
 from app.schemas.user import User as UserSchema
 
-from .helpers import _meta_from_table, _paginate
+from .helpers import _meta_from_table, _paginate, _safe_list_query
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -130,10 +130,8 @@ async def list_zoning(
         count_q = count_q.where(and_(*filters))
         data_q = data_q.where(and_(*filters))
 
-    total = (await db.execute(count_q)).scalar_one()
     offset = (page - 1) * limit
-    rows = (await db.execute(data_q.offset(offset).limit(limit))).scalars().all()
-    meta = await _meta_from_table(db, ZoningData)
+    rows, total, meta = await _safe_list_query(db, ZoningData, count_q, data_q, offset, limit, page)
     return {
         "items": rows,
         "meta": meta,
@@ -153,12 +151,10 @@ async def list_colony_approvals(
     db: AsyncSession = Depends(get_db),
 ):
     """List colony approvals."""
-    total = (await db.execute(select(func.count()).select_from(ColonyApproval))).scalar_one()
+    count_q = select(func.count()).select_from(ColonyApproval)
+    data_q = select(ColonyApproval)
     offset = (page - 1) * limit
-    rows = (
-        await db.execute(select(ColonyApproval).offset(offset).limit(limit))
-    ).scalars().all()
-    meta = await _meta_from_table(db, ColonyApproval)
+    rows, total, meta = await _safe_list_query(db, ColonyApproval, count_q, data_q, offset, limit, page)
     return {
         "items": rows,
         "meta": meta,
@@ -195,10 +191,8 @@ async def list_gazette(
         count_q = count_q.where(and_(*filters))
         data_q = data_q.where(and_(*filters))
 
-    total = (await db.execute(count_q)).scalar_one()
     offset = (page - 1) * limit
-    rows = (await db.execute(data_q.offset(offset).limit(limit))).scalars().all()
-    meta = await _meta_from_table(db, GazetteNotification)
+    rows, total, meta = await _safe_list_query(db, GazetteNotification, count_q, data_q, offset, limit, page)
     return {
         "items": rows,
         "meta": meta,

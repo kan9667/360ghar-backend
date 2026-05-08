@@ -151,6 +151,42 @@ class TestFlatmatesSwipeEndpoint:
             assert data["did_match"] is True
 
 
+class TestFlatmatesLikesEndpoint:
+    @pytest.mark.asyncio
+    async def test_get_incoming_likes_success(self, authenticated_client: AsyncClient):
+        with patch(
+            "app.api.api_v1.endpoints.flatmates.list_incoming_likes",
+            new_callable=AsyncMock,
+        ) as mock_list:
+            mock_list.return_value = [
+                {
+                    "id": 31,
+                    "peer": {
+                        "id": 44,
+                        "full_name": "Incoming User",
+                        "profile_image_url": None,
+                        "mode": "seeker",
+                        "match_percentage": 82,
+                    },
+                    "context_property": {
+                        "id": 99,
+                        "title": "Sunny room",
+                        "monthly_rent": 18000,
+                    },
+                    "created_at": datetime.now(timezone.utc),
+                }
+            ]
+
+            response = await authenticated_client.get("/api/v1/flatmates/likes")
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data[0]["id"] == 31
+            assert data[0]["peer"]["id"] == 44
+            assert data[0]["context_property"]["id"] == 99
+            mock_list.assert_awaited_once()
+
+
 class TestFlatmatesConversationsEndpoint:
     @pytest.mark.asyncio
     async def test_get_conversations_success(self, authenticated_client: AsyncClient):
@@ -182,6 +218,21 @@ class TestFlatmatesConversationsEndpoint:
                     "last_message_preview": "Hey, is the room still available?",
                     "last_message_at": datetime.now(timezone.utc).isoformat(),
                     "unread_count": 1,
+                    "qna": {
+                        "current_user": {
+                            "user_id": 1,
+                            "q1": "A quiet home",
+                            "q2": "Balanced",
+                            "q3": "Clean kitchen",
+                        },
+                        "peer": {
+                            "user_id": 2,
+                            "q1": "Respectful flatmates",
+                            "q2": "Mostly private",
+                            "q3": "No smoking indoors",
+                        },
+                        "both_answered": True,
+                    },
                 }
             ]
 
@@ -191,6 +242,8 @@ class TestFlatmatesConversationsEndpoint:
             data = response.json()
             assert len(data) == 1
             assert data[0]["peer"]["full_name"] == "Owner User"
+            assert data[0]["qna"]["both_answered"] is True
+            assert data[0]["qna"]["peer"]["q3"] == "No smoking indoors"
 
     @pytest.mark.asyncio
     async def test_post_message_success(self, authenticated_client: AsyncClient):

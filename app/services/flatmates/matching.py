@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import BadRequestException
 from app.core.logging import get_logger
@@ -18,17 +20,57 @@ from app.models.enums import (
     UserMatchStatus,
 )
 from app.models.properties import Property
-from app.models.social import UserConversation, UserMatch
+from app.models.social import FlatmateSuperLikeUsage, UserConversation, UserMatch
 from app.models.users import User, UserSwipe
 from app.schemas.flatmates import SwipeRequest
 from app.services.flatmates.conversations import _ensure_conversation
 from app.services.flatmates.helpers import (
+    _build_peer_payload,
+    _build_property_context,
     _canonical_pair,
     _ensure_match,
     _is_blocked,
 )
 
 logger = get_logger(__name__)
+SUPER_LIKE_DAILY_CAP = 3
+
+
+async def _consume_super_like_quota(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    target_user_id: int,
+    existing_swipe: UserSwipe | None = None,
+) -> None:
+    if existing_swipe and existing_swipe.swipe_action == SwipeAction.super_like.value:
+        return
+
+    used_on = datetime.now(timezone.utc).date()
+    existing_usage_stmt = select(FlatmateSuperLikeUsage.id).where(
+        FlatmateSuperLikeUsage.user_id == user_id,
+        FlatmateSuperLikeUsage.target_user_id == target_user_id,
+        FlatmateSuperLikeUsage.used_on == used_on,
+    )
+    existing_usage = (await db.execute(existing_usage_stmt)).scalar_one_or_none()
+    if existing_usage is not None:
+        return
+
+    count_stmt = select(func.count(FlatmateSuperLikeUsage.id)).where(
+        FlatmateSuperLikeUsage.user_id == user_id,
+        FlatmateSuperLikeUsage.used_on == used_on,
+    )
+    used_count = int((await db.execute(count_stmt)).scalar() or 0)
+    if used_count >= SUPER_LIKE_DAILY_CAP:
+        raise BadRequestException(detail="Daily super like limit reached")
+
+    db.add(
+        FlatmateSuperLikeUsage(
+            user_id=user_id,
+            target_user_id=target_user_id,
+            used_on=used_on,
+        )
+    )
 
 
 async def record_swipe(
@@ -119,6 +161,13 @@ async def record_swipe(
         UserSwipe.target_user_id == payload.target_user_id,
     )
     existing = (await db.execute(stmt)).scalar_one_or_none()
+    if payload.action == SwipeAction.super_like:
+        await _consume_super_like_quota(
+            db,
+            user_id=user_id,
+            target_user_id=payload.target_user_id,
+            existing_swipe=existing,
+        )
     if existing:
         existing.target_type = payload.target_type.value
         existing.swipe_action = payload.action.value
@@ -200,11 +249,50 @@ async def record_swipe(
     }
 
 
+async def list_incoming_likes(
+    db: AsyncSession,
+    user_id: int,
+    *,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """Return positive profile swipes the current user has not answered yet."""
+    current_user = await db.get(User, user_id)
+    answered_target_ids = select(UserSwipe.target_user_id).where(
+        UserSwipe.user_id == user_id,
+        UserSwipe.target_user_id.is_not(None),
+    )
+    stmt = (
+        select(UserSwipe)
+        .options(selectinload(UserSwipe.user), selectinload(UserSwipe.context_property))
+        .where(
+            UserSwipe.target_type == SwipeTargetType.user.value,
+            UserSwipe.target_user_id == user_id,
+            UserSwipe.is_liked.is_(True),
+            ~UserSwipe.user_id.in_(answered_target_ids),
+        )
+        .order_by(UserSwipe.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    incoming_swipes = list((await db.execute(stmt)).scalars().all())
+
+    items: list[dict[str, Any]] = []
+    for swipe in incoming_swipes:
+        if swipe.user is None or await _is_blocked(db, user_id, swipe.user_id):
+            continue
+        items.append(
+            {
+                "id": swipe.id,
+                "peer": _build_peer_payload(swipe.user, current_user),
+                "context_property": _build_property_context(swipe.context_property),
+                "created_at": swipe.created_at,
+            }
+        )
+    return items
+
+
 async def list_matches(db: AsyncSession, user_id: int) -> list[dict[str, Any]]:
-    from sqlalchemy.orm import selectinload
-
-    from app.services.flatmates.helpers import _build_peer_payload, _build_property_context
-
     current_user = await db.get(User, user_id)
     stmt = (
         select(UserMatch)

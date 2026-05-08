@@ -1680,7 +1680,7 @@
   "variable": [
     {
       "key": "BASE_URL",
-      "value": "http://localhost:8000",
+      "value": "http://localhost:3600",
       "type": "string"
     },
     {

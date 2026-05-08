@@ -2,7 +2,7 @@ project: 360Ghar
 imagemagick: true
 environments:
   local_dev:
-    url: http://localhost:8000
+    url: http://localhost:3600
     restrictions: []
   production:
     url: https://api.360ghar.com

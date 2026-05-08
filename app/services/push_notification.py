@@ -71,6 +71,7 @@ async def _dispatch(
 # Public API -- generic send
 # ---------------------------------------------------------------------------
 
+
 async def send_push_notification(
     db: AsyncSession,
     *,
@@ -104,6 +105,7 @@ async def send_push_notification(
 # ---------------------------------------------------------------------------
 # Public API -- flatmates domain helpers
 # ---------------------------------------------------------------------------
+
 
 async def notify_new_message(
     db: AsyncSession,
@@ -155,17 +157,21 @@ async def notify_listing_approved(
     *,
     recipient_db_id: int,
     listing_title: str,
+    boosted_for_hours: int | None = None,
 ) -> dict[str, Any]:
     """Notify a listing owner that their flatmate listing was approved.
 
     Deep-link route: ``/post``
     """
+    body = f'Your listing "{listing_title}" is now live'
+    if boosted_for_hours:
+        body = f"{body} and boosted for {boosted_for_hours} hours"
     return await _dispatch(
         db,
         user_db_id=recipient_db_id,
         type_key="flatmate_listing_approved",
         title="Listing Approved",
-        body=f'Your listing "{listing_title}" is now live',
+        body=body,
         data={"route": "/post"},
         deep_link="/post",
     )

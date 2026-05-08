@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.core.exceptions import BadRequestException
 from app.core.logging import get_logger
 from app.models.enums import ConversationSource, ConversationStatus
-from app.models.social import UserConversation, UserMessage
+from app.models.social import MatchQnAAnswer, UserConversation, UserMatch, UserMessage
 from app.models.users import User
 from app.schemas.flatmates import MessageCreate
 from app.services.flatmates.helpers import (
@@ -78,6 +78,61 @@ async def _match_created_at(
     return result.scalar_one_or_none()
 
 
+def _build_qna_answer_payload(answer: MatchQnAAnswer | None) -> dict[str, Any] | None:
+    if answer is None:
+        return None
+    if not any((answer.q1, answer.q2, answer.q3)):
+        return None
+    return {
+        "user_id": answer.user_id,
+        "q1": answer.q1,
+        "q2": answer.q2,
+        "q3": answer.q3,
+    }
+
+
+async def _conversation_qna_state(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    peer_id: int,
+) -> dict[str, Any] | None:
+    user_one_id, user_two_id = _canonical_pair(user_id, peer_id)
+    match_id = (
+        await db.execute(
+            select(UserMatch.id).where(
+                UserMatch.user_one_id == user_one_id,
+                UserMatch.user_two_id == user_two_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if match_id is None:
+        return None
+
+    answer_rows = list(
+        (
+            await db.execute(
+                select(MatchQnAAnswer).where(
+                    MatchQnAAnswer.match_id == match_id,
+                    MatchQnAAnswer.user_id.in_([user_id, peer_id]),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    answer_map = {answer.user_id: answer for answer in answer_rows}
+    current_user = _build_qna_answer_payload(answer_map.get(user_id))
+    peer = _build_qna_answer_payload(answer_map.get(peer_id))
+    if current_user is None and peer is None:
+        return None
+    return {
+        "current_user": current_user,
+        "peer": peer,
+        "both_answered": current_user is not None and peer is not None,
+    }
+
+
 async def get_conversation_summary(
     db: AsyncSession,
     conversation_id: int,
@@ -111,6 +166,7 @@ async def get_conversation_summary(
         "last_message_at": conversation.last_message_at,
         "unread_count": unread_count,
         "matched_at": await _match_created_at(db, user_id, peer_id),
+        "qna": await _conversation_qna_state(db, user_id=user_id, peer_id=peer_id),
     }
 
 
@@ -176,6 +232,11 @@ async def list_conversations(db: AsyncSession, user_id: int) -> list[dict[str, A
                 "last_message_at": conversation.last_message_at,
                 "unread_count": unread_map.get(conversation.id, 0),
                 "matched_at": await _match_created_at(db, user_id, peer_id),
+                "qna": await _conversation_qna_state(
+                    db,
+                    user_id=user_id,
+                    peer_id=peer_id,
+                ),
             }
         )
     return items
@@ -236,6 +297,7 @@ async def send_message(
         body=body,
         attachment_url=payload.attachment_url,
         message_type=payload.message_type.value,
+        message_metadata=payload.metadata,
     )
     db.add(message)
     await db.flush()

@@ -34,7 +34,7 @@ class ReraProject(Base):
     __tablename__ = "rera_projects"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    rera_number: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    rera_number: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     project_name: Mapped[str] = mapped_column(String(500), nullable=False)
     developer_name: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     developer_slug: Mapped[Optional[str]] = mapped_column(String(300), nullable=True, index=True)

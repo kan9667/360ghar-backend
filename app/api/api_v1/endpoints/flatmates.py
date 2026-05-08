@@ -1,9 +1,10 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.api_v1.dependencies.auth import get_current_active_user
 from app.core.database import get_db
@@ -23,12 +24,17 @@ from app.schemas.flatmates import (
     FlatmatesProfile,
     FlatmatesProfileUpdate,
     FlatmateVisitUpdate,
+    IncomingLikeSummary,
     MatchSummary,
     MessageCreate,
     MessageOut,
+    ProfileViewEventCreate,
+    ProfileViewEventOut,
     QnAAnswers,
     ReportCreate,
     ReportOut,
+    SocietyTagVoteCreate,
+    SocietyTagVoteOut,
     SwipeRequest,
     SwipeResult,
 )
@@ -46,10 +52,15 @@ from app.services.flatmates import (
     list_conversations,
     list_discoverable_profiles,
     list_flatmates_notifications,
+    list_incoming_likes,
     list_matches,
     list_messages,
     mark_all_flatmates_notifications_read,
     mark_flatmates_notification_read,
+    pause_expired_flatmate_listings,
+    prescreen_flatmate_listing,
+    record_profile_view_event,
+    record_society_tag_vote,
     record_swipe,
     send_message,
     unmatch_match,
@@ -87,6 +98,32 @@ def _serialize_flatmate_listing(listing: Property) -> dict[str, Any]:
         dict(listing.listing_preferences) if isinstance(listing.listing_preferences, dict) else {}
     )
     moderation_status = preferences.get("moderation_status", "pending_review")
+    raw_images = listing.__dict__.get("images") or []
+    sorted_images = sorted(
+        raw_images,
+        key=lambda image: (
+            getattr(image, "display_order", 0) or 0,
+            getattr(image, "id", 0) or 0,
+        ),
+    )
+    images = [
+        {
+            "id": image.id,
+            "image_url": image.image_url,
+            "caption": image.caption,
+            "display_order": image.display_order,
+            "is_main_image": image.is_main_image,
+        }
+        for image in sorted_images
+        if image.image_url
+    ]
+    image_urls = []
+    seen_image_urls: set[str] = set()
+    for raw_url in [listing.main_image_url, *(image["image_url"] for image in images)]:
+        if not raw_url or raw_url in seen_image_urls:
+            continue
+        seen_image_urls.add(raw_url)
+        image_urls.append(raw_url)
     raw_features = listing.features or []
     if isinstance(raw_features, list):
         features = [str(feature) for feature in raw_features]
@@ -110,12 +147,19 @@ def _serialize_flatmate_listing(listing: Property) -> dict[str, Any]:
         "bedrooms": listing.bedrooms,
         "bathrooms": listing.bathrooms,
         "features": features,
+        "images": images,
+        "image_urls": image_urls,
         "city": listing.city,
         "locality": listing.locality,
+        "sub_locality": listing.sub_locality,
         "main_image_url": listing.main_image_url,
         "owner_id": listing.owner_id,
+        "owner": _serialize_user_summary(listing.__dict__.get("owner")),
         "is_available": listing.is_available,
         "listing_preferences": preferences,
+        "ai_prescreen_result": preferences.get("ai_prescreen_result"),
+        "ai_prescreen_flags": preferences.get("ai_prescreen_flags") or [],
+        "ai_flag_reason": preferences.get("ai_prescreen_reason"),
         "created_at": listing.created_at,
         "updated_at": listing.updated_at,
     }
@@ -218,6 +262,10 @@ async def get_discoverable_profiles(
     city: str | None = Query(default=None),
     budget_min: int | None = Query(default=None),
     budget_max: int | None = Query(default=None),
+    move_in: str | None = Query(
+        default=None,
+        description="Move-in timeline: immediate, this_month, next_month, flexible",
+    ),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     current_user: UserSchema = Depends(get_current_active_user),
@@ -229,6 +277,7 @@ async def get_discoverable_profiles(
         city=city,
         budget_min=budget_min,
         budget_max=budget_max,
+        move_in=move_in,
         limit=limit,
         offset=offset,
     )
@@ -241,6 +290,35 @@ async def swipe(
     db: AsyncSession = Depends(get_db),
 ):
     return await record_swipe(db, current_user.id, payload)
+
+
+@router.get("/likes", response_model=list[IncomingLikeSummary])
+async def get_incoming_likes(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: UserSchema = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await list_incoming_likes(db, current_user.id, limit=limit, offset=offset)
+
+
+@router.post("/profile-views", response_model=ProfileViewEventOut)
+async def record_profile_view(
+    payload: ProfileViewEventCreate,
+    current_user: UserSchema = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await record_profile_view_event(db, current_user.id, payload)
+
+
+@router.post("/listings/{listing_id}/society-tags/votes", response_model=SocietyTagVoteOut)
+async def vote_society_tag(
+    listing_id: int,
+    payload: SocietyTagVoteCreate,
+    current_user: UserSchema = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await record_society_tag_vote(db, current_user.id, listing_id, payload)
 
 
 @router.get("/conversations", response_model=list[ConversationSummary])
@@ -513,8 +591,11 @@ async def get_pending_listings(
     if not _is_admin_user(current_user):
         raise HTTPException(status_code=403, detail="Admin access required")
 
+    await pause_expired_flatmate_listings(db)
+
     result = await db.execute(
         select(Property)
+        .options(selectinload(Property.images), selectinload(Property.owner))
         .where(*_flatmate_listing_filters(status))
         .order_by(Property.created_at.asc())
         .offset(offset)
@@ -580,11 +661,19 @@ async def moderate_listing(
     preferences = (
         dict(listing.listing_preferences) if isinstance(listing.listing_preferences, dict) else {}
     )
+    moderated_at = datetime.now(timezone.utc)
+    approval_boost_granted = False
     preferences["moderation_status"] = moderation_status
     preferences["moderated_by"] = current_user.id
-    preferences["moderated_at"] = datetime.now(timezone.utc).isoformat()
+    preferences["moderated_at"] = moderated_at.isoformat()
     if reason:
         preferences["moderation_reason"] = reason
+    if action == "approve" and not preferences.get("approval_boost_granted_at"):
+        approval_boost_granted = True
+        preferences["first_approved_at"] = moderated_at.isoformat()
+        preferences["approval_boost_granted_at"] = moderated_at.isoformat()
+        preferences["boosted_until"] = (moderated_at + timedelta(hours=24)).isoformat()
+        preferences["boost_reason"] = "first_approval"
     listing.listing_preferences = preferences
 
     await db.commit()
@@ -598,6 +687,7 @@ async def moderate_listing(
             db,
             recipient_db_id=listing.owner_id,
             listing_title=listing.title or "Your listing",
+            boosted_for_hours=24 if approval_boost_granted else None,
         )
     elif action == "reject":
         await _dispatch_moderation_notification(
@@ -783,7 +873,11 @@ async def prescreen_listing(
     current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """AI pre-screening endpoint — placeholder for V2. Requires admin role."""
+    """Run deterministic AI pre-screening for a flatmates listing. Requires admin role."""
     if not _is_admin_user(current_user):
         raise HTTPException(status_code=403, detail="Admin access required")
-    return {"listing_id": listing_id, "prescreen_result": "pending", "flags": []}
+    return await prescreen_flatmate_listing(
+        db,
+        listing_id,
+        admin_user_id=current_user.id,
+    )

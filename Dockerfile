@@ -20,7 +20,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY . .
 
 # Expose port
-EXPOSE 8000
+EXPOSE 3600
 
 # Run the application
 CMD ["uv", "run", "--no-dev", "python", "run.py"]

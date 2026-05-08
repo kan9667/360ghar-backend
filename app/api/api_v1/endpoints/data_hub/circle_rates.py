@@ -18,7 +18,7 @@ from app.services.data_hub.utils import (
     calculate_stamp_duty,
 )
 
-from .helpers import _STAMP_DUTY_RATES, _meta_from_table, _paginate
+from .helpers import _STAMP_DUTY_RATES, _meta_from_table, _paginate, _safe_list_query
 
 router = APIRouter()
 
@@ -47,11 +47,8 @@ async def list_circle_rates(
         count_q = count_q.where(and_(*filters))
         data_q = data_q.where(and_(*filters))
 
-    total = (await db.execute(count_q)).scalar_one()
     offset = (page - 1) * limit
-    rows = (await db.execute(data_q.offset(offset).limit(limit))).scalars().all()
-    meta = await _meta_from_table(db, CircleRate)
-
+    rows, total, meta = await _safe_list_query(db, CircleRate, count_q, data_q, offset, limit, page)
     return {
         "items": rows,
         "meta": meta,

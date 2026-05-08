@@ -1,7 +1,9 @@
 """
 Enum definitions for database models
 """
+
 from enum import Enum
+
 
 class PropertyType(str, Enum):
     house = "house"
@@ -29,6 +31,7 @@ class PropertyPurpose(str, Enum):
     rent = "rent"
     short_stay = "short_stay"
 
+
 class PropertyStatus(str, Enum):
     available = "available"
     sold = "sold"
@@ -47,6 +50,7 @@ class ListingSharingType(str, Enum):
     private_room = "private_room"
     shared_room = "shared_room"
 
+
 class BookingStatus(str, Enum):
     pending = "pending"
     confirmed = "confirmed"
@@ -55,12 +59,14 @@ class BookingStatus(str, Enum):
     cancelled = "cancelled"
     completed = "completed"
 
+
 class PaymentStatus(str, Enum):
     pending = "pending"
     partial = "partial"
     paid = "paid"
     refunded = "refunded"
     failed = "failed"
+
 
 class VisitStatus(str, Enum):
     scheduled = "scheduled"
@@ -122,6 +128,7 @@ class MessageType(str, Enum):
     text = "text"
     image = "image"
     system = "system"
+    visit_request = "visit_request"
 
 
 class UserReportReason(str, Enum):
@@ -138,15 +145,18 @@ class UserReportStatus(str, Enum):
     dismissed = "dismissed"
     actioned = "actioned"
 
+
 class AgentType(str, Enum):
     general = "general"
     specialist = "specialist"
     senior = "senior"
 
+
 class ExperienceLevel(str, Enum):
     beginner = "beginner"
     intermediate = "intermediate"
     expert = "expert"
+
 
 class BugType(str, Enum):
     ui_bug = "ui_bug"
@@ -156,11 +166,13 @@ class BugType(str, Enum):
     feature_request = "feature_request"
     other = "other"
 
+
 class BugSeverity(str, Enum):
     low = "low"
     medium = "medium"
     high = "high"
     critical = "critical"
+
 
 class BugStatus(str, Enum):
     open = "open"
@@ -168,10 +180,12 @@ class BugStatus(str, Enum):
     resolved = "resolved"
     closed = "closed"
 
+
 class PageFormat(str, Enum):
     html = "html"
     markdown = "markdown"
     json = "json"
+
 
 class ImageCategory(str, Enum):
     room = "room"
@@ -188,6 +202,7 @@ class ImageCategory(str, Enum):
     others = "others"
     floor_plan = "floor_plan"
 
+
 class UserRole(str, Enum):
     user = "user"
     agent = "agent"
@@ -197,6 +212,7 @@ class UserRole(str, Enum):
 # --------------------
 # Property Management
 # --------------------
+
 
 class ManagedPropertyStatus(str, Enum):
     draft = "draft"
@@ -301,6 +317,7 @@ class InspectionType(str, Enum):
 # 360 Virtual Tours
 # --------------------
 
+
 class TourStatus(str, Enum):
     draft = "draft"
     published = "published"
@@ -314,6 +331,7 @@ class TourVisibility(str, Enum):
     - unlisted: Anyone with the link can view, but not indexed in public listings
     - public: Visible in public listings and searchable
     """
+
     private = "private"
     unlisted = "unlisted"
     public = "public"
@@ -332,11 +350,13 @@ class HotspotType(str, Enum):
 # Data Hub
 # --------------------
 
+
 class ScraperStatus(str, Enum):
     running = "running"
     success = "success"
     partial = "partial"
     failed = "failed"
+
 
 class AuctionSource(str, Enum):
     # Original
@@ -376,11 +396,13 @@ class AuctionSource(str, Enum):
     union = "union"
     yes_bank = "yes_bank"
 
+
 class GazetteType(str, Enum):
     land_acquisition = "land_acquisition"
     rate_revision = "rate_revision"
     policy = "policy"
     clu_change = "clu_change"
+
 
 class ComplaintNature(str, Enum):
     delay = "delay"

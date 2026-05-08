@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "360ghar-admin-dashboard",
     "name": "360Ghar Admin + Agent Dashboard API",
-    "description": "Complete Postman collection for Admin and Agent Dashboard functionality.\n\n## Overview\nThis collection provides comprehensive API endpoints for managing the 360Ghar real estate platform from both Admin and Agent perspectives.\n\n## User Roles\n- **Admin**: Full system access, user/agent/property management\n- **Agent**: Limited access to assigned users and properties\n- **User**: Standard user endpoints\n\n## Setup Instructions\n1. Import this collection into Postman\n2. Create/update environment with BASE_URL and credentials\n3. Authenticate in Supabase and paste a valid access token into `access_token`\n4. Use role-specific endpoints based on your access level\n\n## Environment Variables\n- `BASE_URL`: API base URL (e.g., http://localhost:8000)\n- `access_token`: Supabase access token (set from a valid Supabase session)\n- `current_user_id`: Current user ID\n- `current_user_role`: User role (admin/agent/user)\n\n## Key Features\n- Role-based access control enforcement\n- Comprehensive property filtering and management\n- User-agent assignment system\n- Visit and booking management\n- System statistics and workload monitoring\n- File upload capabilities",
+    "description": "Complete Postman collection for Admin and Agent Dashboard functionality.\n\n## Overview\nThis collection provides comprehensive API endpoints for managing the 360Ghar real estate platform from both Admin and Agent perspectives.\n\n## User Roles\n- **Admin**: Full system access, user/agent/property management\n- **Agent**: Limited access to assigned users and properties\n- **User**: Standard user endpoints\n\n## Setup Instructions\n1. Import this collection into Postman\n2. Create/update environment with BASE_URL and credentials\n3. Authenticate in Supabase and paste a valid access token into `access_token`\n4. Use role-specific endpoints based on your access level\n\n## Environment Variables\n- `BASE_URL`: API base URL (e.g., http://localhost:3600)\n- `access_token`: Supabase access token (set from a valid Supabase session)\n- `current_user_id`: Current user ID\n- `current_user_role`: User role (admin/agent/user)\n\n## Key Features\n- Role-based access control enforcement\n- Comprehensive property filtering and management\n- User-agent assignment system\n- Visit and booking management\n- System statistics and workload monitoring\n- File upload capabilities",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "360ghar-admin"
   },
@@ -5289,7 +5289,7 @@
                 }
               ]
             },
-            "description": "WebSocket endpoint for real-time AI job progress updates.\n\n**Protocol:** WebSocket (ws:// or wss://)\n**Auth:** JWT token via ?token= query param\n**Messages:** JSON objects with {status, progress, result}\n\nUse a WebSocket client (not Postman HTTP) to connect. Example: wscat -c 'ws://localhost:8000/ws/jobs/123?token=YOUR_TOKEN'"
+            "description": "WebSocket endpoint for real-time AI job progress updates.\n\n**Protocol:** WebSocket (ws:// or wss://)\n**Auth:** JWT token via ?token= query param\n**Messages:** JSON objects with {status, progress, result}\n\nUse a WebSocket client (not Postman HTTP) to connect. Example: wscat -c 'ws://localhost:3600/ws/jobs/123?token=YOUR_TOKEN'"
           },
           "response": []
         },
@@ -5315,7 +5315,7 @@
                 }
               ]
             },
-            "description": "WebSocket endpoint for real-time user notifications.\n\n**Protocol:** WebSocket (ws:// or wss://)\n**Auth:** JWT token via ?token= query param\n**Messages:** JSON notification objects\n\nUse a WebSocket client. Example: wscat -c 'ws://localhost:8000/ws/user?token=YOUR_TOKEN'"
+            "description": "WebSocket endpoint for real-time user notifications.\n\n**Protocol:** WebSocket (ws:// or wss://)\n**Auth:** JWT token via ?token= query param\n**Messages:** JSON notification objects\n\nUse a WebSocket client. Example: wscat -c 'ws://localhost:3600/ws/user?token=YOUR_TOKEN'"
           },
           "response": []
         },
@@ -5342,7 +5342,7 @@
                 }
               ]
             },
-            "description": "WebSocket endpoint for real-time virtual tour collaboration.\n\n**Protocol:** WebSocket (ws:// or wss://)\n**Auth:** JWT token via ?token= query param\n**Messages:** JSON objects with scene/hotspot change events\n\nUse a WebSocket client. Example: wscat -c 'ws://localhost:8000/ws/tours/abc123?token=YOUR_TOKEN'"
+            "description": "WebSocket endpoint for real-time virtual tour collaboration.\n\n**Protocol:** WebSocket (ws:// or wss://)\n**Auth:** JWT token via ?token= query param\n**Messages:** JSON objects with scene/hotspot change events\n\nUse a WebSocket client. Example: wscat -c 'ws://localhost:3600/ws/tours/abc123?token=YOUR_TOKEN'"
           },
           "response": []
         }
@@ -5353,7 +5353,7 @@
   "variable": [
     {
       "key": "BASE_URL",
-      "value": "http://localhost:8000",
+      "value": "http://localhost:3600",
       "type": "string",
       "description": "API base URL"
     },

@@ -14,8 +14,8 @@ description: >
 **Strategy: Local dev server.** This project does NOT use Vercel/Netlify preview deployments (backend only).
 
 1. Start the dev server locally: `uv run python run.py` or `python run.py`
-2. Poll `http://localhost:8000/health` until it responds with `"status": "healthy"`
-3. Use `http://localhost:8000` as the base URL for all API tests
+2. Poll `http://localhost:3600/health` until it responds with `"status": "healthy"`
+3. Use `http://localhost:3600` as the base URL for all API tests
 
 **CRITICAL:** The sub-skill MUST NEVER fall back to a remote environment (dev, staging, prod) when testing a PR branch. Remote environments run different code -- testing against them tells you nothing about the PR's changes. If the local dev server is not available, report BLOCKED.
 
@@ -39,7 +39,7 @@ Body: { "email": "qa+signup_{RUN_ID}@360ghar.com", "password": "..." }
 ## API Base URL
 
 ```
-BASE_URL=http://localhost:8000/api/v1
+BASE_URL=http://localhost:3600/api/v1
 ```
 
 ## Available Test Flows
@@ -209,7 +209,7 @@ Authorization: Bearer <supabase-jwt-token>
 
 ## Known Failure Modes
 
-1. **Dev server not running.** If `curl -sf http://localhost:8000/health` fails, the dev server needs to be started. Run `uv run python run.py` in the background.
+1. **Dev server not running.** If `curl -sf http://localhost:3600/health` fails, the dev server needs to be started. Run `uv run python run.py` in the background.
 
 2. **Supabase token expired.** Supabase JWTs expire after 30 minutes (configurable). If auth tests suddenly return 401, the token may have expired. Re-authenticate via Supabase Auth API.
 

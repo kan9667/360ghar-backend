@@ -217,7 +217,7 @@ class TestMCPAuthIntegration:
 
         verifier = SupabaseTokenVerifier(
             required_scopes=["mcp:read"],
-            expected_resource="http://localhost:8000/mcp"
+            expected_resource="http://localhost:3600/mcp"
         )
 
         # Mock the token store
@@ -225,7 +225,7 @@ class TestMCPAuthIntegration:
             mock_get.return_value = {
                 "user_id": "123",
                 "scope": "mcp:read",
-                "resource": "http://localhost:8000/mcp",
+                "resource": "http://localhost:3600/mcp",
                 "expires_at": 9999999999  # Far future
             }
 
@@ -259,7 +259,7 @@ class TestMCPAuthIntegration:
             mock_get.return_value = {
                 "user_id": "123",
                 "scope": "mcp:read",
-                "resource": "http://localhost:8000/mcp",
+                "resource": "http://localhost:3600/mcp",
                 "expires_at": 1  # Expired long ago
             }
 
@@ -275,7 +275,7 @@ class TestMCPAuthIntegration:
 
         verifier = SupabaseTokenVerifier(
             required_scopes=["mcp:read"],
-            expected_resource="http://localhost:8000/mcp"
+            expected_resource="http://localhost:3600/mcp"
         )
 
         with patch("app.services.oauth_token_store.oauth_token_store.get_access_token", new_callable=AsyncMock) as mock_get:
@@ -298,14 +298,14 @@ class TestMCPAuthIntegration:
 
         verifier = SupabaseTokenVerifier(
             required_scopes=["mcp:write"],
-            expected_resource="http://localhost:8000/mcp"
+            expected_resource="http://localhost:3600/mcp"
         )
 
         with patch("app.services.oauth_token_store.oauth_token_store.get_access_token", new_callable=AsyncMock) as mock_get:
             mock_get.return_value = {
                 "user_id": "123",
                 "scope": "mcp:read",  # Missing mcp:write
-                "resource": "http://localhost:8000/mcp",
+                "resource": "http://localhost:3600/mcp",
                 "expires_at": 9999999999
             }
 
