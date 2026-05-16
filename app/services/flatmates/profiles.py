@@ -15,10 +15,11 @@ from app.models.enums import (
     FlatmatesProfileStatus,
     PropertyPurpose,
     PropertyType,
+    SwipeTargetType,
 )
 from app.models.properties import Property
 from app.models.social import AppCatalog, UserConversation, UserMessage
-from app.models.users import User
+from app.models.users import User, UserSwipe
 from app.schemas.flatmates import FlatmatesProfileUpdate
 from app.services.flatmates.helpers import (
     _build_peer_payload,
@@ -77,6 +78,12 @@ async def list_discoverable_profiles(
     blocker_ids = list((await db.execute(blocker_stmt)).scalars().all())
     excluded = {user_id, *blocked_ids, *blocker_ids}
 
+    swiped_subq = select(UserSwipe.target_user_id).where(
+        UserSwipe.user_id == user_id,
+        UserSwipe.target_type == SwipeTargetType.user.value,
+        UserSwipe.target_user_id.is_not(None),
+    )
+
     # --- Deal-breaker (non-negotiables) filtering (P0-4) ---
     requesting_user = await db.get(User, user_id)
     non_negotiables: list[str] = []
@@ -89,6 +96,7 @@ async def list_discoverable_profiles(
 
     filters = [
         User.id.notin_(excluded),
+        User.id.notin_(swiped_subq),
         User.flatmates_onboarding_completed.is_(True),
         User.flatmates_profile_status == FlatmatesProfileStatus.active,
     ]
