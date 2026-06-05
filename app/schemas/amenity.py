@@ -71,14 +71,15 @@ class PropertyAmenityResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    @model_validator(mode="after")
-    def flatten_amenity_relationship(self) -> dict[str, Any] | "PropertyAmenityResponse":
-        if hasattr(self, "amenity") and getattr(self, "amenity", None) is not None:
-            amenity = self.amenity
+    @model_validator(mode="before")
+    @classmethod
+    def flatten_amenity_relationship(cls, data: Any) -> Any:
+        if hasattr(data, "amenity") and data.amenity is not None:
+            amenity = data.amenity
             return {
-                "id": amenity.id,
+                "id": data.id,
                 "title": amenity.title,
                 "icon": amenity.icon,
                 "category": amenity.category,
             }
-        return self
+        return data
