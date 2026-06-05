@@ -23,22 +23,21 @@ Usage:
   # Resume (skip posts that already have Supabase Storage URLs)
   uv run python scripts/blog_image_acquisition.py --phase acquire --resume
 """
+
 from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import re
 import sys
-import time
 from pathlib import Path
-from typing import Optional
-from datetime import datetime, UTC
 
 import httpx
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -48,9 +47,9 @@ MEDIA_DIR = PROJECT_ROOT / "seed_data" / "media" / "blogs"
 
 # Rate limits: Pixabay ~5000/hr, Pexels ~200/hr
 PIXABAY_DELAY = 0.5  # seconds between requests
-PEXELS_DELAY = 18    # seconds between requests (200/hr = ~18s, stay within rate limit)
-UPLOAD_DELAY = 0.5   # seconds between Supabase uploads
-DOWNLOAD_TIMEOUT = 30 # seconds for image download
+PEXELS_DELAY = 18  # seconds between requests (200/hr = ~18s, stay within rate limit)
+UPLOAD_DELAY = 0.5  # seconds between Supabase uploads
+DOWNLOAD_TIMEOUT = 30  # seconds for image download
 
 # Minimum image dimensions for blog cover
 MIN_WIDTH = 800
@@ -59,7 +58,9 @@ OG_WIDTH = 1200
 OG_HEIGHT = 630
 
 
-def _slugify_search(title: str, focus_keyword: str | None = None, categories: list[str] | None = None) -> str:
+def _slugify_search(
+    title: str, focus_keyword: str | None = None, categories: list[str] | None = None
+) -> str:
     """Derive a search query from blog title, focus_keyword, and categories.
 
     Strategy: Extract the TOPIC (not specific names/numbers) and add real estate context.
@@ -82,25 +83,32 @@ def _slugify_search(title: str, focus_keyword: str | None = None, categories: li
         ("indoor plants home", ["indoor plant", "air purifying plant"]),
         ("home garden green", ["garden", "terrace garden"]),
         ("home water feature", ["water fountain"]),
-
         # Celebrity / specific person (before generic "luxury" or "garden")
-        ("luxury celebrity home", ["celebrity", "bollywood", "cricketer", "net worth", "residence", "duplex", "crore sale"]),
+        (
+            "luxury celebrity home",
+            [
+                "celebrity",
+                "bollywood",
+                "cricketer",
+                "net worth",
+                "residence",
+                "duplex",
+                "crore sale",
+            ],
+        ),
         ("mumbai luxury apartment", ["bandra", "juhu", "pali hill", "worli", "poes garden"]),
         ("mumbai residential building", ["malad", "andheri"]),
         ("affordable housing mumbai", ["mhad", "lottery"]),
-
         # Property types (before generic "apartment")
         ("luxury villa exterior", ["villa"]),
         ("paying guest accommodation", ["pg "]),
         ("shared apartment living", ["flatmate"]),
         ("residential plot land", ["plot"]),
-
         # Specific features (before generic)
         ("smart home technology", ["smart home"]),
         ("virtual reality property", ["virtual tour", "360 tour"]),
         ("green building sustainable", ["sustainability", "green building"]),
         ("home interior design", ["home decor", "interior design"]),
-
         # Infrastructure / policy (specific)
         ("metro city real estate", ["metro"]),
         ("highway real estate development", ["expressway", "highway"]),
@@ -118,7 +126,6 @@ def _slugify_search(title: str, focus_keyword: str | None = None, categories: li
         ("property tax", ["tax "]),
         ("city pollution buildings", ["pollution"]),
         ("real estate verification", ["verified listing", "verified property"]),
-
         # Location-based (before generic)
         ("luxury residential golf course", ["golf course"]),
         ("expressway development", ["dwarka "]),
@@ -129,12 +136,10 @@ def _slugify_search(title: str, focus_keyword: str | None = None, categories: li
         ("pune apartment building", ["pune"]),
         ("hyderabad residential complex", ["hyderabad"]),
         ("kolkata residential building", ["kolkata"]),
-
         # Property size (before generic "apartment")
         ("apartment building", ["2bhk", "2 bhk"]),
         ("modern apartment interior", ["3bhk", "3 bhk"]),
         ("luxury apartment interior", ["4bhk", "4 bhk", "5bhk"]),
-
         # Generic property types (lowest priority)
         ("luxury apartment building", ["luxury"]),
         ("premium apartment interior", ["premium"]),
@@ -142,7 +147,6 @@ def _slugify_search(title: str, focus_keyword: str | None = None, categories: li
         ("rental apartment", ["rental", " rent "]),
         ("apartment interior", ["flat ", "apartment"]),
         ("residential area buildings", ["sector", "locality"]),
-
         # Seasonal / environment
         ("rainy season home", ["monsoon"]),
         ("home booking registration", ["booking"]),
@@ -160,18 +164,108 @@ def _slugify_search(title: str, focus_keyword: str | None = None, categories: li
         text += " " + focus_keyword
     words = re.findall(r"[a-zA-Z0-9]+'?[a-zA-Z0-9]*", text)
     stop = {
-        "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
-        "of", "with", "by", "from", "is", "it", "its", "are", "was", "were",
-        "be", "been", "being", "have", "has", "had", "do", "does", "did",
-        "will", "would", "could", "should", "may", "might", "can", "need",
-        "this", "that", "these", "those", "what", "which", "who", "whom",
-        "how", "why", "when", "where", "all", "each", "every", "both", "few",
-        "more", "most", "other", "some", "such", "no", "not", "only", "same",
-        "so", "than", "too", "very", "just", "about", "up", "out", "if",
-        "their", "your", "our", "my", "his", "her", "inside", "look",
-        "case", "study", "guide", "tips", "complete", "ultimate",
-        "comprehensive", "detailed", "deep", "dive", "exploring",
-        "path", "right", "new", "best", "top", "vs", "1", "2", "3", "4",
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "is",
+        "it",
+        "its",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "can",
+        "need",
+        "this",
+        "that",
+        "these",
+        "those",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "how",
+        "why",
+        "when",
+        "where",
+        "all",
+        "each",
+        "every",
+        "both",
+        "few",
+        "more",
+        "most",
+        "other",
+        "some",
+        "such",
+        "no",
+        "not",
+        "only",
+        "same",
+        "so",
+        "than",
+        "too",
+        "very",
+        "just",
+        "about",
+        "up",
+        "out",
+        "if",
+        "their",
+        "your",
+        "our",
+        "my",
+        "his",
+        "her",
+        "inside",
+        "look",
+        "case",
+        "study",
+        "guide",
+        "tips",
+        "complete",
+        "ultimate",
+        "comprehensive",
+        "detailed",
+        "deep",
+        "dive",
+        "exploring",
+        "path",
+        "right",
+        "new",
+        "best",
+        "top",
+        "vs",
+        "1",
+        "2",
+        "3",
+        "4",
     }
     clean = [w for w in words if w.lower() not in stop and len(w) > 2 and not w.isdigit()]
     query = " ".join(clean[:3]).lower()
@@ -179,7 +273,21 @@ def _slugify_search(title: str, focus_keyword: str | None = None, categories: li
     if not query:
         query = "real estate"
 
-    if not any(kw in query for kw in ["home", "house", "apartment", "flat", "villa", "property", "real estate", "building", "interior", "architecture"]):
+    if not any(
+        kw in query
+        for kw in [
+            "home",
+            "house",
+            "apartment",
+            "flat",
+            "villa",
+            "property",
+            "real estate",
+            "building",
+            "interior",
+            "architecture",
+        ]
+    ):
         query += " real estate"
 
     return query[:200]
@@ -210,6 +318,7 @@ class ImageAcquisition:
         """Lazy-init Supabase storage client."""
         if self._supabase_storage is None:
             from app.core.auth import get_supabase_storage_client
+
             self._supabase_storage = get_supabase_storage_client()
         return self._supabase_storage
 
@@ -217,18 +326,24 @@ class ImageAcquisition:
         """Check if URL is already a Supabase Storage public URL."""
         return "supabase.co" in url and "/storage/" in url
 
-    async def _upload_to_supabase(self, file_path: Path, blog_id: int, ext: str) -> Optional[str]:
+    async def _upload_to_supabase(self, file_path: Path, blog_id: int, ext: str) -> str | None:
         """Upload image to Supabase Storage blog-covers bucket and return public URL."""
         if self.dry_run:
             return f"dry-run://blog-covers/{blog_id}{ext}"
 
         try:
             storage = self._get_supabase_storage()
-            bucket = "blog-covers"
+            bucket = os.environ.get("SUPABASE_STORAGE_BUCKET", settings.SUPABASE_STORAGE_BUCKET)
             storage_path = f"blog-covers/{blog_id}{ext}"
 
             with open(file_path, "rb") as f:
-                content_type = "image/jpeg" if ext in (".jpg", ".jpeg") else "image/webp" if ext == ".webp" else "image/png"
+                content_type = (
+                    "image/jpeg"
+                    if ext in (".jpg", ".jpeg")
+                    else "image/webp"
+                    if ext == ".webp"
+                    else "image/png"
+                )
                 # Delete existing file first (upsert not always reliable)
                 try:
                     storage.storage.from_(bucket).remove([storage_path])
@@ -255,11 +370,14 @@ class ImageAcquisition:
             return
 
         try:
-            await session.execute(text("""
+            await session.execute(
+                text("""
                 UPDATE blog_posts
                 SET cover_image_url = :cover, og_image_url = :og
                 WHERE id = :pid
-            """), {"cover": cover_url, "og": og_url, "pid": blog_id})
+            """),
+                {"cover": cover_url, "og": og_url, "pid": blog_id},
+            )
             self.stats["db_updated"] += 1
         except Exception as e:
             print(f"    [ERROR] DB update failed for blog {blog_id}: {e}")
@@ -272,12 +390,14 @@ class ImageAcquisition:
                 return False
             # Verify it's a valid image (not HTML error pages, etc.)
             try:
-                from PIL import Image
                 import io
+
+                from PIL import Image
+
                 img = Image.open(io.BytesIO(resp.content))
                 img.verify()
             except Exception:
-                print(f"    [WARN] Downloaded content is not a valid image, skipping")
+                print("    [WARN] Downloaded content is not a valid image, skipping")
                 return False
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(resp.content)
@@ -292,11 +412,13 @@ class ImageAcquisition:
         """Download existing cover_image_urls and re-upload to Supabase Storage."""
         print("\n=== Phase 1: Recover Existing Hotlinked Images ===")
 
-        r = await session.execute(text("""
+        r = await session.execute(
+            text("""
             SELECT id, title, cover_image_url
             FROM blog_posts
             WHERE cover_image_url IS NOT NULL AND cover_image_url != ''
-        """))
+        """)
+        )
         posts = r.fetchall()
         print(f"Found {len(posts)} posts with existing cover_image_url")
 
@@ -306,7 +428,7 @@ class ImageAcquisition:
                     self.stats["skipped"] += 1
                     continue
 
-                print(f"  [{idx+1}/{len(posts)}] Blog {pid}: {title[:60]}...")
+                print(f"  [{idx + 1}/{len(posts)}] Blog {pid}: {title[:60]}...")
 
                 # Determine file extension from URL
                 ext = self._ext_from_url(url)
@@ -326,13 +448,13 @@ class ImageAcquisition:
                         self.stats["recovered_failed"] += 1
                 else:
                     self.stats["recovered_failed"] += 1
-                    print(f"    -> FAILED to download")
+                    print("    -> FAILED to download")
 
                 await asyncio.sleep(UPLOAD_DELAY)
 
     # ─── Phase 2: Acquire images from Pixabay/Pexels ───────────────────────
 
-    async def _search_pixabay(self, client: httpx.AsyncClient, query: str) -> Optional[str]:
+    async def _search_pixabay(self, client: httpx.AsyncClient, query: str) -> str | None:
         """Search Pixabay and return the best unused image URL."""
         if not self.pixabay_key:
             return None
@@ -368,7 +490,7 @@ class ImageAcquisition:
         except Exception:
             return None
 
-    async def _search_pexels(self, client: httpx.AsyncClient, query: str) -> Optional[str]:
+    async def _search_pexels(self, client: httpx.AsyncClient, query: str) -> str | None:
         """Search Pexels and return the best unused image URL (landscape for OG tags)."""
         if not self.pexels_key:
             return None
@@ -411,18 +533,20 @@ class ImageAcquisition:
             return
 
         if has_pixabay:
-            print(f"  Pixabay API: available")
+            print("  Pixabay API: available")
         if has_pexels:
-            print(f"  Pexels API: available")
+            print("  Pexels API: available")
 
         # Get posts without images
-        r = await session.execute(text("""
+        r = await session.execute(
+            text("""
             SELECT id, title, focus_keyword
             FROM blog_posts
             WHERE active = true
               AND (cover_image_url IS NULL OR cover_image_url = '')
             ORDER BY id
-        """))
+        """)
+        )
         posts = r.fetchall()
 
         if limit > 0:
@@ -432,23 +556,25 @@ class ImageAcquisition:
 
         # Get categories for each post
         post_categories = {}
-        r = await session.execute(text("""
+        r = await session.execute(
+            text("""
             SELECT bp.id, bc.name
             FROM blog_posts bp
             JOIN blog_post_categories bpc ON bp.id = bpc.post_id
             JOIN blog_categories bc ON bpc.category_id = bc.id
             WHERE bp.active = true AND (bp.cover_image_url IS NULL OR bp.cover_image_url = '')
-        """))
+        """)
+        )
         for pid, cat_name in r.fetchall():
             post_categories.setdefault(pid, []).append(cat_name)
 
         async with httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT, follow_redirects=True) as client:
             for idx, (pid, title, fk) in enumerate(posts):
-                print(f"  [{idx+1}/{len(posts)}] Blog {pid}: {title[:60]}...")
+                print(f"  [{idx + 1}/{len(posts)}] Blog {pid}: {title[:60]}...")
 
                 cats = post_categories.get(pid, [])
                 search_query = _slugify_search(title, fk, cats)
-                print(f"    Search: \"{search_query}\"")
+                print(f'    Search: "{search_query}"')
 
                 image_url = None
                 source = None
@@ -485,7 +611,7 @@ class ImageAcquisition:
 
                 if not image_url:
                     self.stats["acquired_failed"] += 1
-                    print(f"    -> NO IMAGE FOUND")
+                    print("    -> NO IMAGE FOUND")
                     continue
 
                 # Track image URL to prevent duplicates
@@ -529,16 +655,18 @@ class ImageAcquisition:
 
         has_pexels = bool(self.pexels_key)
         if has_pexels:
-            print(f"  Pexels API: available")
+            print("  Pexels API: available")
 
         # Get posts without images
-        r = await session.execute(text("""
+        r = await session.execute(
+            text("""
             SELECT id, title, focus_keyword
             FROM blog_posts
             WHERE active = true
               AND (cover_image_url IS NULL OR cover_image_url = '')
             ORDER BY id
-        """))
+        """)
+        )
         posts = r.fetchall()
 
         if limit > 0:
@@ -548,23 +676,25 @@ class ImageAcquisition:
 
         # Get categories
         post_categories = {}
-        r = await session.execute(text("""
+        r = await session.execute(
+            text("""
             SELECT bp.id, bc.name
             FROM blog_posts bp
             JOIN blog_post_categories bpc ON bp.id = bpc.post_id
             JOIN blog_categories bc ON bpc.category_id = bc.id
             WHERE bp.active = true AND (bp.cover_image_url IS NULL OR bp.cover_image_url = '')
-        """))
+        """)
+        )
         for pid, cat_name in r.fetchall():
             post_categories.setdefault(pid, []).append(cat_name)
 
         async with httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT, follow_redirects=True) as client:
             for idx, (pid, title, fk) in enumerate(posts):
-                print(f"  [{idx+1}/{len(posts)}] Blog {pid}: {title[:60]}...")
+                print(f"  [{idx + 1}/{len(posts)}] Blog {pid}: {title[:60]}...")
 
                 cats = post_categories.get(pid, [])
                 search_query = _slugify_search(title, fk, cats)
-                print(f"    Search: \"{search_query}\"")
+                print(f'    Search: "{search_query}"')
 
                 image_url = None
                 source = None
@@ -587,7 +717,7 @@ class ImageAcquisition:
 
                 if not image_url:
                     self.stats["acquired_failed"] += 1
-                    print(f"    -> NO IMAGE FOUND")
+                    print("    -> NO IMAGE FOUND")
                     continue
 
                 # Track image URL to prevent duplicates
@@ -645,22 +775,36 @@ class ImageAcquisition:
         print(f"  Upload failed:          {self.stats['upload_failed']}")
         print(f"  Skipped (resume):       {self.stats['skipped']}")
         print(f"  DB rows updated:        {self.stats['db_updated']}")
-        total = self.stats["recovered"] + self.stats["acquired_pixabay"] + self.stats["acquired_pexels"] + self.stats["acquired_unsplash"]
+        total = (
+            self.stats["recovered"]
+            + self.stats["acquired_pixabay"]
+            + self.stats["acquired_pexels"]
+            + self.stats["acquired_unsplash"]
+        )
         print(f"  TOTAL IMAGES PROCURED:  {total}")
 
 
 async def main():
     parser = argparse.ArgumentParser(description="Blog Cover Image Acquisition")
-    parser.add_argument("--phase", choices=["recover", "acquire", "web", "all"], default="all",
-                        help="Which phase to run (default: all)")
+    parser.add_argument(
+        "--phase",
+        choices=["recover", "acquire", "web", "all"],
+        default="all",
+        help="Which phase to run (default: all)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="No changes to DB or storage")
-    parser.add_argument("--resume", action="store_true", help="Skip posts already having Supabase URLs")
-    parser.add_argument("--limit", type=int, default=0, help="Max posts to process in acquire phase (0=all)")
+    parser.add_argument(
+        "--resume", action="store_true", help="Skip posts already having Supabase URLs"
+    )
+    parser.add_argument(
+        "--limit", type=int, default=0, help="Max posts to process in acquire phase (0=all)"
+    )
     args = parser.parse_args()
 
     acq = ImageAcquisition(dry_run=args.dry_run, resume=args.resume)
 
     from app.core.database import AsyncSessionLocal
+
     async with AsyncSessionLocal() as session:
         if args.phase in ("recover", "all"):
             await acq.recover_existing(session)

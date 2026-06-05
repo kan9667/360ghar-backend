@@ -15,6 +15,7 @@ from app.models.tours import FloorPlan
 from app.schemas.tour import FloorPlanCreate, FloorPlanUpdate
 from app.services.tour.helpers import _ensure_tour_ownership
 from app.services.tour.tours import get_tour
+from app.utils.validators import ValidationUtils
 
 logger = get_logger(__name__)
 
@@ -56,11 +57,15 @@ async def create_floor_plan(
     # Convert markers to list of dicts
     markers_data = [m.model_dump() for m in data.markers] if data.markers else []
 
+    image_url = data.image_url
+    if not ValidationUtils.is_absolute_url(image_url):
+        logger.warning("Non-absolute floor plan image URL provided: %s", image_url)
+
     floor_plan = FloorPlan(
         id=str(uuid4()),
         tour_id=tour_id,
         name=data.name,
-        image_url=data.image_url,
+        image_url=image_url,
         floor_number=data.floor_number,
         markers=markers_data,
     )
@@ -81,6 +86,8 @@ async def update_floor_plan(
 
     update_data = data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
+        if field == "image_url" and value is not None and not ValidationUtils.is_absolute_url(value):
+            logger.warning("Non-absolute floor plan image URL provided: %s", value)
         if field == "markers" and value is not None:
             # Convert markers to list of dicts
             value = [m if isinstance(m, dict) else m.model_dump() for m in value]

@@ -21,6 +21,7 @@ from app.core.exceptions import (
 from app.core.logging import get_logger
 from app.models.blogs import BlogCategory, BlogPost, BlogPostCategory, BlogPostTag, BlogTag
 from app.models.enums import UserRole
+from app.utils.validators import ValidationUtils
 
 if TYPE_CHECKING:
     from app.schemas.blog import BlogPost as BlogPostSchema
@@ -187,6 +188,10 @@ async def create_blog_post(db: AsyncSession, data, actor) -> BlogPostSchema:
         getattr(data, "excerpt", None), data.content
     )
     og_image_url = getattr(data, "og_image_url", None) or getattr(data, "cover_image_url", None) or None
+    if data.cover_image_url is not None and not ValidationUtils.is_absolute_url(data.cover_image_url):
+        logger.warning("Non-absolute cover_image_url for blog post: %s", data.cover_image_url)
+    if og_image_url is not None and not ValidationUtils.is_absolute_url(og_image_url):
+        logger.warning("Non-absolute og_image_url for blog post: %s", og_image_url)
 
     # Serialize structured data for JSONB
     sources = _serialize_sources(getattr(data, "sources", None) or [])
@@ -578,6 +583,8 @@ async def update_blog_post(db: AsyncSession, identifier: str, data, actor) -> Bl
     if data.excerpt is not None:
         post.excerpt = data.excerpt
     if data.cover_image_url is not None:
+        if not ValidationUtils.is_absolute_url(data.cover_image_url):
+            logger.warning("Non-absolute cover_image_url for blog post %s: %s", post.id, data.cover_image_url)
         post.cover_image_url = data.cover_image_url
     if getattr(data, "active", None) is not None:
         post.active = bool(data.active)
@@ -595,6 +602,8 @@ async def update_blog_post(db: AsyncSession, identifier: str, data, actor) -> Bl
     if getattr(data, "canonical_url", None) is not None:
         post.canonical_url = data.canonical_url
     if getattr(data, "og_image_url", None) is not None:
+        if not ValidationUtils.is_absolute_url(data.og_image_url):
+            logger.warning("Non-absolute og_image_url for blog post %s: %s", post.id, data.og_image_url)
         post.og_image_url = data.og_image_url
     if getattr(data, "sources", None) is not None:
         post.sources = _serialize_sources(data.sources)

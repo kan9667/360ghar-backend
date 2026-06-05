@@ -29,6 +29,7 @@ from app.services.tour.helpers import (
     _scene_processing_tasks,
 )
 from app.services.tour.tours import get_tour
+from app.utils.validators import ValidationUtils
 
 logger = get_logger(__name__)
 
@@ -79,13 +80,21 @@ async def create_scene(db: AsyncSession, tour_id: str, user_id: int, data: Scene
     result = await db.execute(max_order_query)
     max_order = result.scalar() or -1
 
+    image_url = data.image_url
+    thumbnail_url = data.thumbnail_url
+
+    if image_url and not ValidationUtils.is_absolute_url(image_url):
+        logger.warning("Non-absolute image_url for scene in tour %s: %s", tour_id, image_url)
+    if thumbnail_url and not ValidationUtils.is_absolute_url(thumbnail_url):
+        logger.warning("Non-absolute thumbnail_url for scene in tour %s: %s", tour_id, thumbnail_url)
+
     scene = Scene(
         id=str(uuid4()),
         tour_id=tour_id,
         title=data.title,
         description=data.description,
-        image_url=data.image_url,
-        thumbnail_url=data.thumbnail_url,
+        image_url=image_url,
+        thumbnail_url=thumbnail_url,
         order_index=data.order_index if data.order_index is not None else max_order + 1,
         scene_metadata=data.metadata.model_dump() if data.metadata else None,
         is_processed=False,  # Will be set to True after background processing
@@ -118,6 +127,8 @@ async def update_scene(db: AsyncSession, scene_id: str, user_id: int, data: Scen
 
     update_data = data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
+        if field in ("image_url", "thumbnail_url") and value is not None and not ValidationUtils.is_absolute_url(value):
+            logger.warning("Non-absolute %s for scene %s: %s", field, scene_id, value)
         if field == "metadata" and value is not None:
             value = value if isinstance(value, dict) else value.model_dump()
             scene.scene_metadata = value

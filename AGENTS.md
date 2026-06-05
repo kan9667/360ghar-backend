@@ -19,6 +19,14 @@ uv run python scripts/validate_docs_contracts.py
 
 > **Note:** Dev dependencies (pytest, ruff, mypy) are in the `dev` optional group. Install with `uv sync --extra dev`.
 
+## Database Safety Rules
+
+- **Never delete real user data**: Destructive database operations (`DELETE`, `TRUNCATE`, `DROP`) on tables that may contain real user data must be reviewed with the user before execution. Never run `02_clear_data.py` against production.
+- **Seed data clearance is selective**: The `02_clear_data.py` script uses `WHERE is_seed_data = true` on `users`, `agents`, and `properties` tables, and deletes child records via subquery joins to seed parents. This ensures real (non-seed) data is never touched.
+- **Child tables are protected via FK joins**: Tables without an `is_seed_data` column (PropertyImage, Visit, Booking, BlogPost, etc.) are deleted only when their parent seed record is identified via `WHERE fk_col IN (SELECT id FROM parent WHERE is_seed_data = true)`. Never issue bare `DELETE FROM <table>` on tables that could contain real data.
+- **Before destructive operations**: Always confirm the target database is a development environment, not production. Use `--dry-run` flags where available to preview changes.
+- **New seeded models**: When adding a new model that is populated by seed scripts, either add an `is_seed_data` boolean column (with `server_default=text("false")`) or ensure a FK cascade chain links it back to a parent with `is_seed_data`.
+
 ## Layering Rules
 - HTTP endpoints in `app/api/api_v1/endpoints/` validate input, enforce auth through dependencies, and delegate business logic to `app/services/`.
 - REST route composition lives in `app/api/api_v1/api.py`; `app/factory.py` is the composition root, while app wiring, middleware, lifespan, and MCP mounts live in `app/infrastructure/`.
@@ -99,6 +107,9 @@ All code must pass `uv run ruff check app/` before commit. The CI `lint` job enf
 - Any new AI provider or vision model constant added to `app/core/constants.py`
 - Any new SSE event type or subscription (emit/subscribe change)
 - Any new infrastructure module or lifespan change (startup/shutdown wiring)
+- Any new or modified seed data (generators, loaders, clear script)
+- Any new storage bucket, StorageFolder enum value, or storage path convention
+- Any new `is_seed_data` column added to a model
 
 ## Documentation Drift Checklist
 - New public endpoint
@@ -112,4 +123,8 @@ All code must pass `uv run ruff check app/` before commit. The CI `lint` job enf
 - New SSE event type or subscription
 - New infrastructure module or lifespan change
 - New MCP tool_ops shared function
+- New or modified seed data (generators, loaders, clear script)
+- New storage bucket, StorageFolder, or storage path convention
+- New is_seed_data column on a model
+- Changes to media upload workflow (buckets, paths, optimization)
 - If any item changed, update the relevant doc in `docs/` and `docs/repo-contract.json`

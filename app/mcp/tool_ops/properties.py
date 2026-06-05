@@ -31,6 +31,7 @@ from app.services.pm_properties import (
     list_managed_properties,
 )
 from app.services.user import get_user_by_id
+from app.utils.validators import ValidationUtils
 
 logger = get_logger(__name__)
 
@@ -178,6 +179,11 @@ async def create_property(
         return {"error": True, "message": f"Invalid purpose: {purpose}"}
 
     actor_schema = _user_schema(actor)
+
+    if main_image_url is not None and not ValidationUtils.is_absolute_url(main_image_url):
+        logger.warning("Non-absolute main_image_url provided: %s", main_image_url)
+    if virtual_tour_url is not None and not ValidationUtils.is_absolute_url(virtual_tour_url):
+        logger.warning("Non-absolute virtual_tour_url provided: %s", virtual_tour_url)
 
     property_data = PropertyCreate(
         title=title,

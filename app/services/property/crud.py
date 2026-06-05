@@ -38,6 +38,7 @@ from app.services.flatmates.moderation import (
 )
 from app.services.pm_authz import _get_actor_role
 from app.services.property.helpers import _validate_listing_contract, build_location_wkt
+from app.utils.validators import ValidationUtils
 
 logger = get_logger(__name__)
 
@@ -48,6 +49,9 @@ def _clean_image_urls(image_urls: list[str] | None) -> list[str]:
     for raw_url in image_urls or []:
         url = str(raw_url).strip()
         if not url or url in seen_urls:
+            continue
+        if not ValidationUtils.is_absolute_url(url):
+            logger.warning("Skipping non-absolute image URL: %s", url)
             continue
         seen_urls.add(url)
         cleaned_urls.append(url)

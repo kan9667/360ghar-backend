@@ -43,6 +43,7 @@ from app.mcp.tool_ops import (
 # Import the user MCP server instance to register tools
 from app.mcp.user.server import _get_user, _require_auth, user_mcp
 from app.mcp.utils import get_db
+from app.utils.validators import ValidationUtils
 
 logger = get_logger(__name__)
 
@@ -321,6 +322,9 @@ async def owner_properties_update(
                     message="Please log in to update a property listing.",
                     scope="mcp:write",
                 )
+
+            if main_image_url is not None and not ValidationUtils.is_absolute_url(main_image_url):
+                logger.warning("Non-absolute main_image_url in owner_properties_update: %s", main_image_url)
 
             updates = {
                 k: v for k, v in {

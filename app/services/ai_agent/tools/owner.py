@@ -20,6 +20,7 @@ from app.mcp.utils import (
     serialize_property_full,
 )
 from app.services.ai_agent.tools.helpers import AgentDeps, _user_schema
+from app.utils.validators import ValidationUtils
 
 logger = get_logger(__name__)
 
@@ -128,6 +129,11 @@ async def owner_properties_create(
     prop_type = PropertyType(property_type.lower())
     prop_purpose = PropertyPurpose(purpose.lower())
 
+    if main_image_url is not None and not ValidationUtils.is_absolute_url(main_image_url):
+        logger.warning("Non-absolute main_image_url in AI agent owner_properties_create: %s", main_image_url)
+    if virtual_tour_url is not None and not ValidationUtils.is_absolute_url(virtual_tour_url):
+        logger.warning("Non-absolute virtual_tour_url in AI agent owner_properties_create: %s", virtual_tour_url)
+
     data = PropertyCreate(
         title=title, description=description, property_type=prop_type,
         purpose=prop_purpose, full_address=full_address, city=city,
@@ -184,6 +190,10 @@ async def owner_properties_update(
     db, user = ctx.deps.db, ctx.deps.user
     prop = await assert_can_access_property(db, actor=_user_schema(user),
                                             property_id=property_id)
+
+    if main_image_url is not None and not ValidationUtils.is_absolute_url(main_image_url):
+        logger.warning("Non-absolute main_image_url in AI agent owner_properties_update: %s", main_image_url)
+
     updates = {
         "title": title, "description": description, "base_price": base_price,
         "monthly_rent": monthly_rent, "daily_rate": daily_rate,

@@ -6,6 +6,9 @@ from typing import Any
 import bleach  # type: ignore[import-untyped]
 
 from app.core.exceptions import ValidationException
+from app.core.logging import get_logger
+
+_logger = get_logger(__name__)
 
 
 class ValidationUtils:
@@ -181,3 +184,41 @@ class ValidationUtils:
                 )
 
         return items
+
+    @staticmethod
+    def is_absolute_url(url: str) -> bool:
+        """Check if a URL string is an absolute URL (starts with http:// or https://)."""
+        if not url:
+            return False
+        return url.startswith("http://") or url.startswith("https://")
+
+    @staticmethod
+    def filter_absolute_urls(
+        urls: list[str],
+        *,
+        field_name: str = "url",
+        context: str | None = None,
+    ) -> list[str]:
+        """Filter a list of URLs to only keep absolute URLs, logging warnings for skipped ones.
+
+        Args:
+            urls: List of URL strings to filter.
+            field_name: Label for the field being filtered (for logging).
+            context: Optional context string (e.g. function name) for logging.
+
+        Returns:
+            List of URLs that are absolute (http/https).
+        """
+        if not urls:
+            return urls
+        filtered: list[str] = []
+        for url in urls:
+            if ValidationUtils.is_absolute_url(url):
+                filtered.append(url)
+            else:
+                ctx = f" [{context}]" if context else ""
+                _logger.warning(
+                    "Skipping non-absolute %s: %s%s",
+                    field_name, url, ctx,
+                )
+        return filtered

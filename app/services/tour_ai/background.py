@@ -17,6 +17,7 @@ from app.models.enums import TourStatus
 from app.models.tours import AIJob, Hotspot, Scene, Tour
 from app.schemas.tour import TourGenerationRequest, TourGenerationSceneInput
 from app.services.ai import AIMessage, AIProviderError, AIRole, VisionInput
+from app.utils.validators import ValidationUtils
 
 from .helpers import (
     ROOM_TYPES,
@@ -185,6 +186,8 @@ async def generate_tour(
         image_url = scene_payload.get("image_url")
         if not image_url:
             raise BadRequestException(detail="Scene image_url is required")
+        if not ValidationUtils.is_absolute_url(image_url):
+            logger.warning("Non-absolute image_url for AI tour scene: %s", image_url)
 
         metadata = scene_payload.get("metadata") or scene_payload.get("scene_metadata")
         if metadata and not isinstance(metadata, dict):

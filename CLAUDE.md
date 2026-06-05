@@ -45,9 +45,15 @@ uv run python seed_data/01_load_all.py --dry-run                 # Validate with
 uv run python seed_data/generators/01_generate_seed_data.py      # Regenerate Category 2 seed JSON
 uv run python seed_data/generators/02_generate_activity.py       # Regenerate Category 3 activity JSON
 
+# Optimize seed images (reduce Docker image size)
+uv run python scripts/optimize_seed_images.py                    # Full run
+uv run python scripts/optimize_seed_images.py --dry-run          # Preview only
+
 # Clear all data
 uv run python seed_data/02_clear_data.py --confirm               # Wipe all seeded data
 ```
+
+> **⚠️ Data Safety**: `02_clear_data.py` is a **dev-only** script. It uses subquery-based FK mapping to only delete data linked to seed records (`WHERE is_seed_data = true` on users/agents/properties). Never run this or any destructive DB operation against production without explicit user confirmation. Real user data must never be deleted by seed scripts.
 
 ### Database
 ```bash
@@ -450,6 +456,46 @@ Dev dependencies (pytest, ruff, mypy) are in the `dev` optional group: `uv sync 
 - Request logging middleware for all routes including MCP (`app/middleware/security.py`)
 - Sentry integration for error tracking and performance monitoring (`send_default_pii=False`)
 - Request ID context var properly reset in `finally` block via `reset_request_id(token)` in `RequestIDMiddleware`
+
+## Data Safety
+
+### Destructive Operations Policy
+
+- **Never delete real user data**: All destructive database operations must be reviewed with the user before execution. The `02_clear_data.py` script is the only tool that performs bulk deletions, and it respects `is_seed_data` boundaries.
+- **Seed data clearance is selective**: `02_clear_data.py` filters by `WHERE is_seed_data = true` on `users`, `agents`, and `properties`. Child records (PropertyImage, Visit, Booking, BlogPost, Tour, PM entities, social data) are deleted via subquery joins to their seed parents — never via bare `DELETE FROM`.
+- **Real data protection**: Tables without `is_seed_data` column are only touched when their FK parent is a confirmed seed record. Real users, properties, agents, and their child records are never deleted by seed scripts.
+- **Dev-only scripts**: Scripts in `seed_data/` are designed for local development. Never run them against a production database.
+
+### `is_seed_data` Flag
+
+The `is_seed_data` boolean column (default `false`) exists on:
+- `users` — marks seed/demo user accounts
+- `agents` — marks seed/demo agent profiles
+- `properties` — marks seed/demo property listings
+
+Child entities (PropertyImage, Visit, Booking, Tour, BlogPost, PM entities, social records, data hub records) do **not** have their own `is_seed_data` column — they are identified as "seed" via FK joins to their parent. When adding a new seeded model, either add `is_seed_data` or ensure FK cascade to an existing seeded parent.
+
+### Seed Data Lifecycle
+
+1. **Generate**: `seed_data/generators/` produce deterministic JSON files with `random.seed(42)`
+2. **Load**: `seed_data/loaders/` insert data into the database, setting `is_seed_data = true` on User/Agent/Property records
+3. **Media**: `seed_data/loaders/05_media_loader.py` uploads images to Supabase Storage (`360ghar-storage` bucket) using `generate_storage_path()` with the appropriate `StorageFolder` enum
+4. **Clear**: `02_clear_data.py` removes seed data via subquery-based FK mapping, preserving real (non-seed) records
+
+### Media Upload Conventions
+
+| Content Type | StorageFolder | Bucket | Path Pattern |
+|-------------|---------------|--------|-------------|
+| User avatars | `AVATAR` | `360ghar-storage` | `users/{user_id}/avatars/{uuid}-{name}` |
+| Property images | `PROPERTY_IMAGE` | `360ghar-storage` | `users/{user_id}/properties/{property_id}/images/{uuid}-{name}` |
+| Property videos | `PROPERTY_VIDEO` | `360ghar-storage` | `users/{user_id}/properties/{property_id}/videos/{uuid}-{name}` |
+| Blog covers | `BLOG_COVER` | `360ghar-storage` | `users/{user_id}/blog-covers/{uuid}-{name}` |
+| Tour assets | `TOUR_*` / `SCENE_*` | `360ghar-storage` | `users/{user_id}/tours/{tour_id}/...` |
+| Documents | `DOCUMENT_*` | `360ghar-storage` | `users/{user_id}/documents/{type}/{uuid}-{name}` |
+| Agent avatars | `AGENT_AVATAR` | `360ghar-storage` | `agents/{agent_id}/avatars/{uuid}-{name}` |
+| General uploads | `GENERIC_UPLOAD` | `360ghar-storage` | `users/{user_id}/uploads/{uuid}-{name}` |
+
+All media uploads use the shared `httpx` clients from `app/core/http.py` for outbound HTTP calls. Image files are optimized via `optimize_for_web()` from `app/services/image_processing.py` before upload.
 
 ## API Documentation
 

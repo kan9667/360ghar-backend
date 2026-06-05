@@ -26,6 +26,7 @@ from app.mcp.admin.agent_tools.common import (
     serialize_user_basic,
     utc_now_iso,
 )
+from app.utils.validators import ValidationUtils
 
 
 @admin_mcp.tool(
@@ -272,6 +273,9 @@ async def agent_properties_create_for_owner(
             from app.services.pm_properties import create_managed_property
 
             user_schema = UserSchema.model_validate(user)
+
+            if main_image_url is not None and not ValidationUtils.is_absolute_url(main_image_url):
+                logger.warning("Non-absolute main_image_url in agent_properties_create_for_owner: %s", main_image_url)
 
             property_data = PropertyCreate(
                 title=title,

@@ -27,6 +27,7 @@ from app.services.flatmates.helpers import (
     _serialize_flatmate_notification,
 )
 from app.services.notifications import _supa, list_notifications_for_user
+from app.utils.validators import ValidationUtils
 
 logger = get_logger(__name__)
 
@@ -199,7 +200,10 @@ async def update_flatmates_profile(
     if "full_name" in update_data:
         user.full_name = update_data.pop("full_name")
     if "profile_image_url" in update_data:
-        user.profile_image_url = update_data.pop("profile_image_url")
+        url = update_data.pop("profile_image_url")
+        if url is not None and not ValidationUtils.is_absolute_url(url):
+            logger.warning("Non-absolute profile_image_url for user %s: %s", user_id, url)
+        user.profile_image_url = url
 
     preference_fields = ("age", "profession", "gender", "gender_preference")
     current_preferences = user.preferences if isinstance(user.preferences, dict) else {}

@@ -20,6 +20,7 @@ from app.services.flatmates.helpers import (
     _build_property_context,
     _canonical_pair,
 )
+from app.utils.validators import ValidationUtils
 
 logger = get_logger(__name__)
 
@@ -334,11 +335,17 @@ async def send_message(
         raise BadRequestException(detail="Conversation is not active")
 
     body = payload.body.strip() if payload.body else None
+    attachment_url = payload.attachment_url
+    if attachment_url is not None and not ValidationUtils.is_absolute_url(attachment_url):
+        logger.warning(
+            "Non-absolute attachment_url in conversation %s from user %s: %s",
+            conversation_id, user_id, attachment_url,
+        )
     message = UserMessage(
         conversation_id=conversation.id,
         sender_id=user_id,
         body=body,
-        attachment_url=payload.attachment_url,
+        attachment_url=attachment_url,
         message_type=payload.message_type,
         message_metadata=payload.metadata,
     )

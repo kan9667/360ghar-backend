@@ -13,6 +13,7 @@ from app.core.logging import get_logger
 from app.models.enums import UserRole
 from app.models.users import User
 from app.schemas.user import UserUpdate
+from app.utils.validators import ValidationUtils
 
 logger = get_logger(__name__)
 
@@ -227,6 +228,8 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate, a
 
         # Apply updates
         for field, value in update_data.items():
+            if field == "profile_image_url" and value is not None and not ValidationUtils.is_absolute_url(value):
+                logger.warning("Non-absolute profile_image_url for user %s: %s", user_id, value)
             setattr(user, field, value)
 
         await db.flush()

@@ -5,12 +5,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import BadRequestException, InsufficientPermissionsError
+from app.core.logging import get_logger
 from app.models.enums import ImageCategory, LeaseStatus, ManagedPropertyStatus, UserRole
 from app.models.pm_leases import Lease
 from app.models.properties import Property, PropertyAmenity, PropertyImage
 from app.schemas.property import PropertyCreate
 from app.schemas.user import User as UserSchema
 from app.services.pm_authz import assert_can_access_property, assert_can_manage_owner_portfolio
+from app.utils.validators import ValidationUtils
+
+logger = get_logger(__name__)
 
 
 async def create_managed_property(
@@ -153,6 +157,7 @@ async def update_managed_property(
         prop.late_fee_policy = late_fee_policy
 
     # Handle images: delete existing and create new ones
+    stored_images: list[str] = []
     if images is not None:
         # Delete existing property images (except floor plans)
         await db.execute(
@@ -165,15 +170,21 @@ async def update_managed_property(
         )
         # Create new image records
         for idx, url in enumerate(images):
-            if url and url.strip():
-                img = PropertyImage(
-                    property_id=property_id,
-                    image_url=url.strip(),
-                    image_category=ImageCategory.others,
-                    display_order=idx,
-                    is_main_image=(idx == 0),  # First image is main
-                )
-                db.add(img)
+            stripped = url.strip() if url else ""
+            if not stripped:
+                continue
+            if not ValidationUtils.is_absolute_url(stripped):
+                logger.warning("Skipping non-absolute image URL for property %s: %s", property_id, stripped)
+                continue
+            stored_images.append(stripped)
+            img = PropertyImage(
+                property_id=property_id,
+                image_url=stripped,
+                image_category=ImageCategory.others,
+                display_order=idx,
+                is_main_image=(idx == 0),  # First image is main
+            )
+            db.add(img)
 
     # Handle floor plans
     if floor_plans is not None:
@@ -188,19 +199,24 @@ async def update_managed_property(
         )
         # Create new floor plan records
         for idx, url in enumerate(floor_plans):
-            if url and url.strip():
-                img = PropertyImage(
-                    property_id=property_id,
-                    image_url=url.strip(),
-                    image_category=ImageCategory.floor_plan,
-                    display_order=idx,
-                    is_main_image=False,
-                )
-                db.add(img)
+            stripped = url.strip() if url else ""
+            if not stripped:
+                continue
+            if not ValidationUtils.is_absolute_url(stripped):
+                logger.warning("Skipping non-absolute floor plan URL for property %s: %s", property_id, stripped)
+                continue
+            img = PropertyImage(
+                property_id=property_id,
+                image_url=stripped,
+                image_category=ImageCategory.floor_plan,
+                display_order=idx,
+                is_main_image=False,
+            )
+            db.add(img)
 
-    # Update main_image_url on property if images provided
-    if images is not None and len(images) > 0:
-        prop.main_image_url = images[0]
+    # Update main_image_url on property from stored images
+    if stored_images:
+        prop.main_image_url = stored_images[0]
 
     prop.is_managed = True
     await db.flush()
