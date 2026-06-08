@@ -120,7 +120,11 @@ async def owner_properties_create(
     main_image_url: str | None = None,
     virtual_tour_url: str | None = None,
 ) -> dict[str, Any]:
-    """Create a new property listing for the current user."""
+    """Create a new property listing for the current user.
+
+    Note: For rent/flatmate/PG listings, ``monthly_rent`` must be a positive
+    number. The schema validator will reject the request otherwise.
+    """
     from app.models.enums import PropertyPurpose, PropertyType
     from app.schemas.property import PropertyCreate
     from app.services.pm_properties import create_managed_property

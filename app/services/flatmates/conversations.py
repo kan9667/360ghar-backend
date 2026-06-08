@@ -255,6 +255,47 @@ async def list_conversations(db: AsyncSession, user_id: int) -> list[dict[str, A
     unread_rows = (await db.execute(unread_stmt)).all()
     unread_map = {conversation_id: int(count) for conversation_id, count in unread_rows}
 
+    # Bulk load matches
+    match_stmt = select(UserMatch).where(
+        or_(
+            UserMatch.user_one_id == user_id,
+            UserMatch.user_two_id == user_id,
+        )
+    )
+    matches = list((await db.execute(match_stmt)).scalars().all())
+    match_created_at_map = {}
+    match_id_map = {}
+    for match in matches:
+        peer = match.user_one_id if match.user_two_id == user_id else match.user_two_id
+        match_created_at_map[peer] = match.created_at
+        match_id_map[peer] = match.id
+
+    # Bulk load QnA
+    qna_map = {}
+    if match_id_map:
+        qna_stmt = select(MatchQnAAnswer).where(
+            MatchQnAAnswer.match_id.in_(list(match_id_map.values()))
+        )
+        qna_answers = list((await db.execute(qna_stmt)).scalars().all())
+        from collections import defaultdict
+        qna_by_match: dict[int, list[MatchQnAAnswer]] = defaultdict(list)
+        for ans in qna_answers:
+            qna_by_match[ans.match_id].append(ans)
+        
+        for peer, mid in match_id_map.items():
+            answers = qna_by_match.get(mid, [])
+            answer_map = {ans.user_id: ans for ans in answers}
+            cu_ans = _build_qna_answer_payload(answer_map.get(user_id))
+            peer_ans = _build_qna_answer_payload(answer_map.get(peer))
+            if cu_ans is None and peer_ans is None:
+                qna_map[peer] = None
+            else:
+                qna_map[peer] = {
+                    "current_user": cu_ans,
+                    "peer": peer_ans,
+                    "both_answered": cu_ans is not None and peer_ans is not None,
+                }
+
     items: list[dict[str, Any]] = []
     for conversation in conversations:
         peer_id = (
@@ -275,12 +316,8 @@ async def list_conversations(db: AsyncSession, user_id: int) -> list[dict[str, A
                 "last_message_preview": conversation.last_message_preview,
                 "last_message_at": conversation.last_message_at,
                 "unread_count": unread_map.get(conversation.id, 0),
-                "matched_at": await _match_created_at(db, user_id, peer_id),
-                "qna": await _conversation_qna_state(
-                    db,
-                    user_id=user_id,
-                    peer_id=peer_id,
-                ),
+                "matched_at": match_created_at_map.get(peer_id),
+                "qna": qna_map.get(peer_id),
             }
         )
     return items

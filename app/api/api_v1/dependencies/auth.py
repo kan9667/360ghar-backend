@@ -114,7 +114,7 @@ async def get_current_user(
             )
         if not supabase_user_data:
             token_suffix = token[-8:] if len(token) > 8 else token
-            logger.warning(
+            logger.info(
                 "Invalid or expired token (suffix=%s)",
                 token_suffix,
                 extra={"reason": "token_invalid_or_expired", "token_suffix": token_suffix},
@@ -220,7 +220,7 @@ async def get_current_user_sse(
             )
         if not supabase_user_data:
             token_suffix = resolved_token[-8:] if len(resolved_token) > 8 else resolved_token
-            logger.warning(
+            logger.info(
                 "Invalid or expired token (suffix=%s)",
                 token_suffix,
                 extra={"reason": "token_invalid_or_expired", "token_suffix": token_suffix},

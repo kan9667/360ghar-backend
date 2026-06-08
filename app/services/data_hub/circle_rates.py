@@ -46,7 +46,7 @@ class CircleRateScraper(BaseScraper):
                     logger.warning("IGRS navigation failed: %s", nav_e)
                     # Fall back: try district rate PDF page
                     try:
-                        await page.goto("https://igrs.haryana.gov.in/circlerates", timeout=30000)
+                        await page.goto("https://igrs.haryana.gov.in/circlerates", timeout=60000)
                         await asyncio.sleep(2)
                         html = await page.content()
                         results.extend(self._parse_circle_rates_html(html))

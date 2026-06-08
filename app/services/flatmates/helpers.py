@@ -29,6 +29,16 @@ def _flatmates_preferences(user: User) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+# ---------------------------------------------------------------------------
+# Profile and Peer Builders
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Enum Normalizers (Removed)
+# ---------------------------------------------------------------------------
+
+
 def _profile_age(user: User, prefs: dict[str, Any]) -> int | None:
     raw_age = prefs.get("age")
     if isinstance(raw_age, int):
@@ -124,9 +134,13 @@ def _build_profile_payload(user: User) -> dict[str, Any]:
     }
 
 
-def _build_peer_payload(user: User, current_user: User | None = None) -> dict[str, Any]:
+def _build_peer_payload(
+    user: User,
+    current_user: User | None = None,
+    property_obj: Property | None = None,
+) -> dict[str, Any]:
     prefs = _flatmates_preferences(user)
-    return {
+    payload: dict[str, Any] = {
         "id": user.id,
         "full_name": user.full_name,
         "profile_image_url": user.profile_image_url,
@@ -156,6 +170,67 @@ def _build_peer_payload(user: User, current_user: User | None = None) -> dict[st
         "match_percentage": _compatibility_percentage(current_user, user),
         "phone_number": user.phone,
     }
+
+    if property_obj is not None:
+        # Build image_urls from the related PropertyImage rows (already eager-loaded).
+        image_urls: list[str] = []
+        for img in getattr(property_obj, "images", []) or []:
+            if img and getattr(img, "image_url", None):
+                image_urls.append(img.image_url)
+        # Fallback: if no related images, but main_image_url is set, expose it as a single-item list.
+        if not image_urls and property_obj.main_image_url:
+            image_urls = [property_obj.main_image_url]
+
+        amenities: list[str] = []
+        for pa in getattr(property_obj, "property_amenities", []) or []:
+            amenity = getattr(pa, "amenity", None)
+            if amenity and getattr(amenity, "title", None):
+                amenities.append(amenity.title)
+
+        enrichment: dict[str, Any] = {
+            "property_id": property_obj.id,
+            "property_title": property_obj.title,
+            "main_image_url": property_obj.main_image_url,
+            "image_urls": image_urls,
+            "video_tour_url": property_obj.video_tour_url,
+            "virtual_tour_url": property_obj.virtual_tour_url,
+            "monthly_rent": (
+                float(property_obj.monthly_rent)
+                if property_obj.monthly_rent is not None
+                else None
+            ),
+            "security_deposit": (
+                float(property_obj.security_deposit)
+                if property_obj.security_deposit is not None
+                else None
+            ),
+            "maintenance_charges": (
+                float(property_obj.maintenance_charges)
+                if property_obj.maintenance_charges is not None
+                else None
+            ),
+            "latitude": property_obj.latitude,
+            "longitude": property_obj.longitude,
+            "locality": property_obj.locality,
+            "sub_locality": property_obj.sub_locality,
+            "landmark": property_obj.landmark,
+            "city": property_obj.city,
+            "features": list(property_obj.features or []),
+            "amenities": amenities,
+            "bedrooms": property_obj.bedrooms,
+            "bathrooms": property_obj.bathrooms,
+            "balconies": property_obj.balconies,
+            "floor_number": property_obj.floor_number,
+            "total_floors": property_obj.total_floors,
+            "area_sqft": property_obj.area_sqft,
+            "listing_preferences": property_obj.listing_preferences or {},
+        }
+
+        # Only ADD new keys - never overwrite anything already on the payload
+        for key, value in enrichment.items():
+            payload.setdefault(key, value)
+
+    return payload
 
 
 def _build_property_context(property_obj: Property | None) -> dict[str, Any] | None:

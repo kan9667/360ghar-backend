@@ -36,7 +36,7 @@ class GazetteScraper(BaseScraper):
                         from app.core.http import get_scraper_client
 
                         client = get_scraper_client()
-                        resp = await client.get(item["pdf_url"], timeout=30.0)
+                        resp = await client.get(item["pdf_url"], timeout=60.0)
                         resp.raise_for_status()
                         item["pdf_text"] = extract_pdf_text(resp.content)
                         await asyncio.sleep(1)

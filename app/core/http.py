@@ -37,7 +37,7 @@ _supabase_auth_client: httpx.AsyncClient | None = None
 
 
 def _make_client(
-    timeout: float = 30.0,
+    timeout: float = 60.0,
     max_connections: int = 10,
     max_keepalive: int = 3,
     follow_redirects: bool = True,
@@ -56,7 +56,7 @@ def get_scraper_client() -> httpx.AsyncClient:
     """Shared HTTP client for data-hub scrapers."""
     global _scraper_client
     if _scraper_client is None or _scraper_client.is_closed:
-        _scraper_client = _make_client(timeout=30.0, max_connections=10, max_keepalive=3)
+        _scraper_client = _make_client(timeout=60.0, max_connections=10, max_keepalive=3)
     return _scraper_client
 
 
@@ -72,7 +72,7 @@ def get_general_client() -> httpx.AsyncClient:
     """Shared HTTP client for misc outbound calls (image downloads, geocoding, etc.)."""
     global _general_client
     if _general_client is None or _general_client.is_closed:
-        _general_client = _make_client(timeout=30.0, max_connections=5, max_keepalive=2)
+        _general_client = _make_client(timeout=60.0, max_connections=5, max_keepalive=2)
     return _general_client
 
 

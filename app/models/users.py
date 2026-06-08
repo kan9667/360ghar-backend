@@ -21,7 +21,18 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Enum as SQLEnum
 
 from app.core.database import Base
-from app.models.enums import AuthMethod, FlatmatesMode, FlatmatesProfileStatus, UserRole
+from app.models.enums import (
+    AuthMethod,
+    Cleanliness,
+    FlatmatesMode,
+    FlatmatesProfileStatus,
+    FoodHabits,
+    GuestsPolicy,
+    SleepSchedule,
+    SmokingDrinking,
+    UserRole,
+    WorkStyle,
+)
 
 if TYPE_CHECKING:
     from app.models.agents import Agent
@@ -77,12 +88,12 @@ class User(Base):
     flatmates_move_in_timeline: Mapped[str | None] = mapped_column(String(64), nullable=True)
     flatmates_city: Mapped[str | None] = mapped_column(String, nullable=True)
     flatmates_locality: Mapped[str | None] = mapped_column(String, nullable=True)
-    flatmates_sleep_schedule: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    flatmates_cleanliness: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    flatmates_food_habits: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    flatmates_smoking_drinking: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    flatmates_guests_policy: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    flatmates_work_style: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    flatmates_sleep_schedule: Mapped[str | None] = mapped_column(String, nullable=True)
+    flatmates_cleanliness: Mapped[str | None] = mapped_column(String, nullable=True)
+    flatmates_food_habits: Mapped[str | None] = mapped_column(String, nullable=True)
+    flatmates_smoking_drinking: Mapped[str | None] = mapped_column(String, nullable=True)
+    flatmates_guests_policy: Mapped[str | None] = mapped_column(String, nullable=True)
+    flatmates_work_style: Mapped[str | None] = mapped_column(String, nullable=True)
     flatmates_last_active_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

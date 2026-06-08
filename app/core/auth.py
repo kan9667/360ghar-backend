@@ -247,11 +247,18 @@ class SupabaseClientManager:
             return _make_failure(AuthFailureReason.PROVIDER_ERROR, str(exc))
 
         if response.status_code != 200:
-            logger.warning(
-                "Supabase token verification failed: status=%s body=%s",
-                response.status_code,
-                response.text[:200],
-            )
+            if response.status_code in (401, 403):
+                logger.info(
+                    "Supabase token verification failed (expected for expired tokens): status=%s body=%s",
+                    response.status_code,
+                    response.text[:200],
+                )
+            else:
+                logger.warning(
+                    "Supabase token verification failed: status=%s body=%s",
+                    response.status_code,
+                    response.text[:200],
+                )
             return None
 
         try:

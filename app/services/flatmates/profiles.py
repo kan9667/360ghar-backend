@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import BadRequestException
 from app.core.logging import get_logger
@@ -17,7 +18,7 @@ from app.models.enums import (
     PropertyType,
     SwipeTargetType,
 )
-from app.models.properties import Property
+from app.models.properties import Property, PropertyAmenity
 from app.models.social import AppCatalog, UserConversation, UserMessage
 from app.models.users import User, UserSwipe
 from app.schemas.flatmates import FlatmatesProfileUpdate
@@ -117,11 +118,15 @@ async def list_discoverable_profiles(
                 non_negotiables = [str(x) for x in raw_nn]
 
     # --- Exclude users with the same phone number (same-person dedup guard) ---
-    phone_excluded_subq = select(User.id).where(
-        User.phone == requesting_user.phone,
-        User.id != user_id,
-    )
     if requesting_user and requesting_user.phone:
+        base_phone = requesting_user.phone.split("_dup_")[0]
+        phone_excluded_subq = select(User.id).where(
+            or_(
+                User.phone == base_phone,
+                User.phone.like(f"{base_phone}_dup_%")
+            ),
+            User.id != user_id,
+        )
         phone_dup_ids = list((await db.execute(phone_excluded_subq)).scalars().all())
         excluded.update(phone_dup_ids)
 
@@ -136,15 +141,23 @@ async def list_discoverable_profiles(
         if nn == "food_veg_only":
             filters.append(User.flatmates_food_habits.in_(["vegetarian", "vegan", "veg"]))
         elif nn == "food_vegan_only":
-            filters.append(User.flatmates_food_habits == "vegan")
+            filters.append(User.flatmates_food_habits.in_(["vegan"]))
         elif nn == "no_smoking":
-            filters.append(User.flatmates_smoking_drinking.in_(["neither", "never"]))
+            # All known synonyms for "doesn't smoke"
+            filters.append(User.flatmates_smoking_drinking.in_(
+                ["neither", "never", "no", "none", "drink_occasionally"]
+            ))
         elif nn == "no_drinking":
-            filters.append(
-                User.flatmates_smoking_drinking.in_(["neither", "never", "smoke_outside"])
-            )
+            # All known synonyms for "doesn't drink"
+            filters.append(User.flatmates_smoking_drinking.in_(
+                ["neither", "never", "no", "none", "smoke_outside"]
+            ))
         elif nn == "no_overnight_guests":
-            filters.append(User.flatmates_guests_policy.in_(["no_overnight_guests", "rarely"]))
+            # Flutter sends "no_overnight_guests", web sends "no_overnight",
+            # catalog uses "rarely"
+            filters.append(User.flatmates_guests_policy.in_(
+                ["no_overnight_guests", "no_overnight", "rarely"]
+            ))
         elif nn == "no_pets":
             # pets is stored inside preferences.flatmates.pets
             filters.append(
@@ -153,23 +166,39 @@ async def list_discoverable_profiles(
         elif nn == "gender_female_only":
             # gender stored in preferences.flatmates.gender
             filters.append(
-                func.coalesce(cast(User.preferences[("flatmates", "gender")], String), "") == "female"
+                func.coalesce(cast(User.preferences[("flatmates", "gender")], String), "").in_(
+                    ["female", '"female"']
+                )
             )
         elif nn == "gender_male_only":
             filters.append(
-                func.coalesce(cast(User.preferences[("flatmates", "gender")], String), "") == "male"
+                func.coalesce(cast(User.preferences[("flatmates", "gender")], String), "").in_(
+                    ["male", '"male"']
+                )
             )
         elif nn == "no_parties":
             # parties_at_home stored in preferences.flatmates.parties_at_home
+            # JSON text extraction returns quoted strings (e.g. '"never"'), so
+            # we must include both quoted and unquoted variants.
             filters.append(
                 func.coalesce(cast(User.preferences[("flatmates", "parties_at_home")], String), "").notin_(
-                    ["occasional_weekends", "party_friendly", "occasionally", "regularly"]
+                    [
+                        "occasional_weekends", '"occasional_weekends"',
+                        "party_friendly", '"party_friendly"',
+                        "occasionally", '"occasionally"',
+                        "regularly", '"regularly"',
+                    ]
                 )
             )
         elif nn == "min_tidy":
-            filters.append(
-                User.flatmates_cleanliness.in_(["tidy", "spotless", "balanced", "meticulous"])
-            )
+            # All values that mean "at least tidy": canonical + legacy synonyms
+            filters.append(User.flatmates_cleanliness.in_(
+                ["tidy", "spotless", "balanced", "meticulous", "neat_freak", "clean"]
+            ))
+        elif nn == "early_riser":
+            filters.append(User.flatmates_sleep_schedule.in_(
+                ["early_bird", "before_7"]
+            ))
 
     # --- Discovery filtering (P0-8) ---
     if city is not None:
@@ -211,7 +240,38 @@ async def list_discoverable_profiles(
         .offset(offset)
     )
     users = list((await db.execute(stmt)).scalars().all())
-    profiles = [_build_peer_payload(u, current_user=requesting_user) for u in users]
+
+    # --- Batch load active flatmate/PG listings for all matched users (single query, no N+1) ---
+    prop_map: dict[int, Property] = {}
+    if users:
+        owner_ids = [u.id for u in users]
+        property_stmt = (
+            select(Property)
+            .options(
+                selectinload(Property.images),
+                selectinload(Property.property_amenities).selectinload(PropertyAmenity.amenity),
+            )
+            .where(
+                Property.owner_id.in_(owner_ids),
+                Property.property_type.in_([PropertyType.flatmate, PropertyType.pg]),
+                Property.purpose == PropertyPurpose.rent,
+                Property.is_available.is_(True),
+            )
+            .order_by(Property.created_at.desc())
+        )
+        prop_rows = (await db.execute(property_stmt)).scalars().all()
+        for prop in prop_rows:
+            # Keep the most recently created listing per owner (first encountered due to order_by desc)
+            prop_map.setdefault(prop.owner_id, prop)
+
+    profiles = [
+        _build_peer_payload(
+            u,
+            current_user=requesting_user,
+            property_obj=prop_map.get(u.id),
+        )
+        for u in users
+    ]
     return profiles, total
 
 

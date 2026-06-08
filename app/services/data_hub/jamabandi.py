@@ -106,7 +106,7 @@ class JamabandiScraper(BaseScraper):
             "captcha": captcha_token,
         }
         resp = await client.post(
-            f"{_JAMABANDI_BASE}/land records/NakalRecord", data=payload, timeout=30.0
+            f"{_JAMABANDI_BASE}/land records/NakalRecord", data=payload, timeout=60.0
         )
         resp.raise_for_status()
         return self._parse_nakal_html(resp.text, tehsil, village, khasra_number)

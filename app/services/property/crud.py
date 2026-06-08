@@ -130,6 +130,18 @@ async def create_property(
 
         _validate_listing_contract(property_data.property_type, property_data.purpose)
 
+        # Defensive server-side check: rent-bearing listings must have a
+        # positive monthly_rent. The PropertyCreate schema also enforces this,
+        # but this assertion catches any path that bypasses Pydantic
+        # (e.g. raw dict construction in future code paths).
+        if (
+            property_data.property_type in PG_FLATMATE_TYPES
+            or property_data.purpose == PropertyPurpose.rent
+        ) and (property_data.monthly_rent is None or property_data.monthly_rent <= 0):
+            raise BadRequestException(
+                detail="monthly_rent must be a positive number for rent/flatmate/PG listings"
+            )
+
         property_dict = property_data.model_dump(exclude_unset=True, mode="json")
         image_urls = _clean_image_urls(property_dict.pop("image_urls", None))
         if image_urls and not property_dict.get("main_image_url"):

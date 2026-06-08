@@ -38,7 +38,7 @@ class BaankNetAuctionScraper(BaseScraper):
                 try:
                     page = await browser.new_page()
                     try:
-                        await page.goto(url, wait_until="networkidle", timeout=30000)
+                        await page.goto(url, wait_until="networkidle", timeout=60000)
                         # Wait for the results table to render
                         await page.wait_for_selector("table, .grid, .auction-list", timeout=10000)
                         content = await page.content()

@@ -93,6 +93,45 @@ class FlatmatesProfileStatus(str, Enum):
     rejected = "rejected"
 
 
+class SleepSchedule(str, Enum):
+    early_bird = "early_bird"
+    flexible = "flexible"
+    night_owl = "night_owl"
+
+
+class Cleanliness(str, Enum):
+    minimal = "minimal"
+    tidy = "tidy"
+    spotless = "spotless"
+
+
+class FoodHabits(str, Enum):
+    vegetarian = "vegetarian"
+    vegan = "vegan"
+    non_vegetarian = "non_vegetarian"
+    eggetarian = "eggetarian"
+    no_preference = "no_preference"
+
+
+class SmokingDrinking(str, Enum):
+    neither = "neither"
+    smoke_outside = "smoke_outside"
+    drink_occasionally = "drink_occasionally"
+    both_fine = "both_fine"
+
+
+class GuestsPolicy(str, Enum):
+    no_overnight_guests = "no_overnight_guests"
+    occasional_ok = "occasional_ok"
+    open_house = "open_house"
+
+
+class WorkStyle(str, Enum):
+    wfh = "wfh"
+    office = "office"
+    hybrid = "hybrid"
+
+
 class SwipeTargetType(str, Enum):
     property = "property"
     user = "user"

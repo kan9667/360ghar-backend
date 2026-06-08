@@ -88,6 +88,60 @@ class TestCreateProperty:
                 base_price=Decimal("18000"),
             )
 
+    @pytest.mark.asyncio
+    async def test_create_property_rejects_flatmate_without_monthly_rent(self):
+        """Flatmate listings must have a positive monthly_rent at the schema layer."""
+        from app.schemas.property import PropertyCreate
+
+        with pytest.raises(ValidationError):
+            PropertyCreate(
+                title="Flatmate No Rent",
+                property_type=PropertyType.flatmate,
+                purpose=PropertyPurpose.rent,
+                base_price=Decimal("22000"),
+            )
+
+    @pytest.mark.asyncio
+    async def test_create_property_rejects_pg_with_zero_monthly_rent(self):
+        """PG listings with monthly_rent=0 must be rejected at the schema layer."""
+        from app.schemas.property import PropertyCreate
+
+        with pytest.raises(ValidationError):
+            PropertyCreate(
+                title="PG Zero Rent",
+                property_type=PropertyType.pg,
+                purpose=PropertyPurpose.rent,
+                base_price=Decimal("18000"),
+                monthly_rent=Decimal("0"),
+            )
+
+    @pytest.mark.asyncio
+    async def test_create_property_accepts_buy_without_monthly_rent(self):
+        """Buy-purpose listings do not require monthly_rent."""
+        from app.schemas.property import PropertyCreate
+
+        data = PropertyCreate(
+            title="Buy House",
+            property_type=PropertyType.house,
+            purpose=PropertyPurpose.buy,
+            base_price=Decimal("5000000"),
+        )
+        assert data.monthly_rent is None
+
+    @pytest.mark.asyncio
+    async def test_create_property_accepts_short_stay_without_monthly_rent(self):
+        """Short-stay listings use daily_rate, not monthly_rent."""
+        from app.schemas.property import PropertyCreate
+
+        data = PropertyCreate(
+            title="Stay",
+            property_type=PropertyType.studio,
+            purpose=PropertyPurpose.short_stay,
+            base_price=Decimal("3000"),
+            daily_rate=Decimal("3000"),
+        )
+        assert data.monthly_rent is None
+
 
 class TestGetProperty:
     """Tests for get_property function."""

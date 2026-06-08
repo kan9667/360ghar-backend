@@ -39,7 +39,7 @@ class HSVPProcure247AuctionScraper(BaseScraper):
                 try:
                     page = await browser.new_page()
                     try:
-                        await page.goto(url, wait_until="networkidle", timeout=30000)
+                        await page.goto(url, wait_until="networkidle", timeout=60000)
                         # Wait for the auction/tender data to load
                         await page.wait_for_selector("table, .auction-card, .tender-card, .list-item", timeout=10000)
                         content = await page.content()
@@ -57,7 +57,7 @@ class HSVPProcure247AuctionScraper(BaseScraper):
             try:
                 page = await browser.new_page()
                 try:
-                    await page.goto(_HSVP_PROCURE247_URL, wait_until="networkidle", timeout=30000)
+                    await page.goto(_HSVP_PROCURE247_URL, wait_until="networkidle", timeout=60000)
                     content = await page.content()
                     parsed = self._parse_homepage(content)
                     results.extend(parsed)

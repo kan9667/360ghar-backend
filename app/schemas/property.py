@@ -173,6 +173,21 @@ class PropertyCreate(PropertyBase):
         _validate_listing_contract(self.property_type, self.purpose)
         return self
 
+    @model_validator(mode="after")
+    def validate_rent_price_for_rent_purpose(self):
+        """Rent-bearing listings (purpose=rent or PG/flatmate type) must have a
+        positive monthly_rent. Prevents zero-rent rows from being created via
+        any client path (Flutter, web, AI agent, direct API)."""
+        is_rent_listing = (
+            self.purpose == PropertyPurpose.rent
+            or self.property_type in PG_FLATMATE_TYPES
+        )
+        if is_rent_listing and (self.monthly_rent is None or self.monthly_rent <= 0):
+            raise ValueError(
+                "monthly_rent must be a positive number for rent/flatmate/PG listings"
+            )
+        return self
+
 
 class PropertyUpdate(BaseModel):
     title: str | None = None

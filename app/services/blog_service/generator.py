@@ -179,7 +179,7 @@ async def _serpapi_image_search(query: str, count: int = 5) -> list[str]:
     from app.core.http import get_blog_client
 
     client = get_blog_client()
-    resp = await client.get(settings.SERPAPI_SEARCH_ENDPOINT, params=params, timeout=30.0)
+    resp = await client.get(settings.SERPAPI_SEARCH_ENDPOINT, params=params, timeout=60.0)
     if resp.status_code >= 400:
         logger.error("SerpAPI Google Images error %s: %s", resp.status_code, resp.text)
         return []

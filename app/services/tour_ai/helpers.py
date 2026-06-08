@@ -241,7 +241,7 @@ async def _download_image_as_base64(url: str) -> tuple[str, str]:
     from app.core.http import get_general_client
 
     client = get_general_client()
-    response = await client.get(url, timeout=30.0)
+    response = await client.get(url, timeout=60.0)
     response.raise_for_status()
 
     content_type = response.headers.get("content-type", "image/jpeg")

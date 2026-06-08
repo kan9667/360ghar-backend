@@ -99,7 +99,7 @@ async def flatmates_sse(
             yield "event: connected\ndata: {\"status\":\"ok\"}\n\n"
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=30)
+                    event = await asyncio.wait_for(queue.get(), timeout=60)
                     await sse_bus.touch(queue)
                     event_type = event.get("type", "update")
                     payload = json.dumps(event, default=str)

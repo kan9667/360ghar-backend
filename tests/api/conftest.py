@@ -22,7 +22,7 @@ async def guest_client(test_app):
     async with AsyncClient(
         transport=transport,
         base_url="http://test",
-        timeout=30.0,
+        timeout=60.0,
     ) as ac:
         yield ac
 
@@ -56,7 +56,7 @@ async def user_client(test_app, test_user):
     async with AsyncClient(
         transport=transport,
         base_url="http://test",
-        timeout=30.0,
+        timeout=60.0,
     ) as ac:
         yield ac
 
@@ -95,7 +95,7 @@ async def agent_client(test_app, test_agent_user):
     async with AsyncClient(
         transport=transport,
         base_url="http://test",
-        timeout=30.0,
+        timeout=60.0,
     ) as ac:
         yield ac
 
@@ -134,6 +134,6 @@ async def admin_client(test_app, test_admin_user):
     async with AsyncClient(
         transport=transport,
         base_url="http://test",
-        timeout=30.0,
+        timeout=60.0,
     ) as ac:
         yield ac

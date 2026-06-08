@@ -38,12 +38,13 @@ async def get_user_by_phone(db: AsyncSession, phone: str) -> User | None:
 
     Phone has a unique constraint, so this returns at most one user.
     Tries exact match first, then normalized (last-10-digits) match.
+    Prioritizes active users over inactive ones if duplicates exist.
     """
     logger.debug("Fetching user by phone: %s", phone)
     try:
-        stmt = select(User).where(User.phone == phone)
+        stmt = select(User).where(User.phone == phone).order_by(User.is_active.desc(), User.created_at.desc())
         result = await db.execute(stmt)
-        user = result.scalar_one_or_none()
+        user = result.scalars().first()
         if user:
             logger.debug("User found with ID %s for phone %s", user.id, phone)
             return user
@@ -52,9 +53,9 @@ async def get_user_by_phone(db: AsyncSession, phone: str) -> User | None:
         if norm:
             stmt_norm = select(User).where(
                 func.replace(func.replace(func.replace(User.phone, "+", ""), "-", ""), " ", "").like(f"%{norm}")
-            )
+            ).order_by(User.is_active.desc(), User.created_at.desc())
             result_norm = await db.execute(stmt_norm)
-            user = result_norm.scalar_one_or_none()
+            user = result_norm.scalars().first()
             if user:
                 logger.debug("User found via normalized phone match: ID %s for phone %s", user.id, phone)
                 return user
@@ -67,9 +68,9 @@ async def get_user_by_phone(db: AsyncSession, phone: str) -> User | None:
 async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
     logger.debug("Fetching user by email: %s", email)
     try:
-        stmt = select(User).where(User.email == email)
+        stmt = select(User).where(User.email == email).order_by(User.is_active.desc(), User.created_at.desc())
         result = await db.execute(stmt)
-        user = result.scalar_one_or_none()
+        user = result.scalars().first()
         if user:
             logger.debug("User found with ID %s", user.id)
         else:
@@ -84,7 +85,7 @@ async def get_user_by_supabase_id(db: AsyncSession, supabase_user_id: str) -> Us
     try:
         stmt = select(User).where(User.supabase_user_id == supabase_user_id)
         result = await db.execute(stmt)
-        user = result.scalar_one_or_none()
+        user = result.scalars().first()
         if user:
             logger.debug("User found with ID %s", user.id)
         else:
@@ -126,6 +127,8 @@ async def get_or_create_user_from_supabase(db: AsyncSession, supabase_user_data:
         # user with an unconfirmed email would otherwise have that unconfirmed
         # email persisted into the unique email column — which we must avoid.
         email_confirmed = supabase_user_data.get("email_confirmed_at") is not None
+
+        inactive_user = None
 
         # (1) Canonical lookup by supabase_user_id.
         user = await get_user_by_supabase_id(db, supabase_id)
@@ -197,6 +200,8 @@ async def get_or_create_user_from_supabase(db: AsyncSession, supabase_user_data:
                     "present" if email else "none",
                     "present" if phone else "none",
                 )
+                if inactive_user and inactive_user.supabase_user_id == supabase_id:
+                    inactive_user.supabase_user_id = f"__migrated__{inactive_user.id}"
                 user.supabase_user_id = supabase_id
             # Backfill missing fields without overwriting existing data.
             # Skip the phone backfill if that phone already belongs to a
@@ -240,6 +245,8 @@ async def get_or_create_user_from_supabase(db: AsyncSession, supabase_user_data:
                 "present" if email else "none",
                 email_confirmed,
             )
+            if inactive_user and inactive_user.supabase_user_id == supabase_id:
+                inactive_user.supabase_user_id = f"__migrated__{inactive_user.id}"
             user = User(
                 supabase_user_id=supabase_id,
                 # Only persist an email locally when it is verified, so the

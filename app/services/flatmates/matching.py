@@ -20,7 +20,7 @@ from app.models.enums import (
     UserMatchStatus,
 )
 from app.models.properties import Property
-from app.models.social import FlatmateSuperLikeUsage, UserBlock, UserConversation, UserMatch
+from app.models.social import UserBlock, UserConversation, UserMatch
 from app.models.users import User, UserSwipe
 from app.schemas.flatmates import SwipeRequest
 from app.services.flatmates.conversations import _ensure_conversation
@@ -33,44 +33,6 @@ from app.services.flatmates.helpers import (
 )
 
 logger = get_logger(__name__)
-SUPER_LIKE_DAILY_CAP = 3
-
-
-async def _consume_super_like_quota(
-    db: AsyncSession,
-    *,
-    user_id: int,
-    target_user_id: int,
-    existing_swipe: UserSwipe | None = None,
-) -> None:
-    if existing_swipe and existing_swipe.swipe_action == SwipeAction.super_like.value:
-        return
-
-    used_on = datetime.now(timezone.utc).date()
-    existing_usage_stmt = select(FlatmateSuperLikeUsage.id).where(
-        FlatmateSuperLikeUsage.user_id == user_id,
-        FlatmateSuperLikeUsage.target_user_id == target_user_id,
-        FlatmateSuperLikeUsage.used_on == used_on,
-    )
-    existing_usage = (await db.execute(existing_usage_stmt)).scalar_one_or_none()
-    if existing_usage is not None:
-        return
-
-    count_stmt = select(func.count(FlatmateSuperLikeUsage.id)).where(
-        FlatmateSuperLikeUsage.user_id == user_id,
-        FlatmateSuperLikeUsage.used_on == used_on,
-    )
-    used_count = int((await db.execute(count_stmt)).scalar() or 0)
-    if used_count >= SUPER_LIKE_DAILY_CAP:
-        raise BadRequestException(detail="Daily super like limit reached")
-
-    db.add(
-        FlatmateSuperLikeUsage(
-            user_id=user_id,
-            target_user_id=target_user_id,
-            used_on=used_on,
-        )
-    )
 
 
 async def record_swipe(
@@ -161,14 +123,6 @@ async def record_swipe(
         UserSwipe.target_user_id == payload.target_user_id,
     )
     existing = (await db.execute(stmt)).scalar_one_or_none()
-    if payload.action == SwipeAction.super_like:
-        assert payload.target_user_id is not None
-        await _consume_super_like_quota(
-            db,
-            user_id=user_id,
-            target_user_id=payload.target_user_id,
-            existing_swipe=existing,
-        )
     if existing:
         existing.target_type = payload.target_type.value
         existing.swipe_action = payload.action.value
@@ -301,6 +255,12 @@ async def list_incoming_likes(
         UserSwipe.user_id == user_id,
         UserSwipe.target_user_id.is_not(None),
     )
+    blocked_subq = select(UserBlock.blocked_user_id).where(
+        UserBlock.blocker_user_id == user_id,
+    )
+    blocker_subq = select(UserBlock.blocker_user_id).where(
+        UserBlock.blocked_user_id == user_id,
+    )
     stmt = (
         select(UserSwipe)
         .options(selectinload(UserSwipe.user), selectinload(UserSwipe.context_property))
@@ -309,6 +269,8 @@ async def list_incoming_likes(
             UserSwipe.target_user_id == user_id,
             UserSwipe.is_liked.is_(True),
             ~UserSwipe.user_id.in_(answered_target_ids),
+            ~UserSwipe.user_id.in_(blocked_subq),
+            ~UserSwipe.user_id.in_(blocker_subq),
         )
         .order_by(UserSwipe.created_at.desc())
         .limit(limit)
@@ -318,7 +280,7 @@ async def list_incoming_likes(
 
     items: list[dict[str, Any]] = []
     for swipe in incoming_swipes:
-        if swipe.user is None or await _is_blocked(db, user_id, swipe.user_id):
+        if swipe.user is None:
             continue
         items.append(
             {

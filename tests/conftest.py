@@ -199,7 +199,7 @@ async def client(test_app) -> AsyncGenerator[AsyncClient, None]:
     async with AsyncClient(
         transport=transport,
         base_url="http://test",
-        timeout=30.0,
+        timeout=60.0,
     ) as ac:
         yield ac
 

@@ -4,17 +4,23 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.enums import (
+    Cleanliness,
     ConversationSource,
     ConversationStatus,
     FlatmatesMode,
     FlatmatesProfileStatus,
+    FoodHabits,
+    GuestsPolicy,
     MessageType,
+    SleepSchedule,
+    SmokingDrinking,
     SwipeAction,
     SwipeTargetType,
     UserMatchStatus,
     UserReportReason,
     UserReportStatus,
     VisitStatus,
+    WorkStyle,
 )
 
 
@@ -43,14 +49,14 @@ class FlatmatesProfileUpdate(BaseModel):
     move_in_timeline: str | None = None
     city: str | None = None
     locality: str | None = None
-    sleep_schedule: str | None = None
-    cleanliness: str | None = None
-    food_habits: str | None = None
-    smoking_drinking: str | None = None
-    guests_policy: str | None = None
+    sleep_schedule: SleepSchedule | str | None = None
+    cleanliness: Cleanliness | str | None = None
+    food_habits: FoodHabits | str | None = None
+    smoking_drinking: SmokingDrinking | str | None = None
+    guests_policy: GuestsPolicy | str | None = None
     email: str | None = None
     phone: str | None = None
-    work_style: str | None = None
+    work_style: WorkStyle | str | None = None
     gender: str | None = None
     gender_preference: str | None = None
     preferences: dict[str, Any] | None = None
@@ -83,12 +89,12 @@ class FlatmatesProfile(BaseModel):
     move_in_timeline: str | None = None
     city: str | None = None
     locality: str | None = None
-    sleep_schedule: str | None = None
-    cleanliness: str | None = None
-    food_habits: str | None = None
-    smoking_drinking: str | None = None
-    guests_policy: str | None = None
-    work_style: str | None = None
+    sleep_schedule: SleepSchedule | str | None = None
+    cleanliness: Cleanliness | str | None = None
+    food_habits: FoodHabits | str | None = None
+    smoking_drinking: SmokingDrinking | str | None = None
+    guests_policy: GuestsPolicy | str | None = None
+    work_style: WorkStyle | str | None = None
     gender: str | None = None
     gender_preference: str | None = None
     preferences: dict[str, Any] = Field(default_factory=dict)
