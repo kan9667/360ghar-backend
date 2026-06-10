@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import VisitContext, VisitStatus
 from app.schemas.property import Property as PropertySchema
@@ -56,10 +56,24 @@ class VisitComplete(BaseModel):
     notes: str | None = None
     feedback: str | None = None
 
+class VisitAgentInfo(BaseModel):
+    id: int
+    name: str
+    phone: str | None = Field(
+        default=None, validation_alias=AliasChoices("contact_number", "phone")
+    )
+    avatar_url: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class Visit(VisitBase):
     id: int
     user_id: int
     agent_id: int | None = None
+    agents: VisitAgentInfo | None = Field(
+        default=None, validation_alias=AliasChoices("agent", "agents")
+    )
     actual_date: datetime | None = None
     status: VisitStatus
     visit_notes: str | None = None

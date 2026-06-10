@@ -19,6 +19,7 @@ def _visit_load_options():
         selectinload(Visit.property).selectinload(Property.images),
         selectinload(Visit.property).selectinload(Property.property_amenities),
         selectinload(Visit.counterparty_user),
+        selectinload(Visit.agent),
     )
 
 

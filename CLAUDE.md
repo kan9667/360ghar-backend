@@ -160,6 +160,8 @@ app/
 
 **Graceful Shutdown**: On app shutdown, `app/infrastructure/lifespan.py` shuts down the shared `AsyncIOScheduler`, closes cached AI provider HTTP clients, shuts down the notification thread pool, closes all shared httpx clients (scraper, blog, general + FCM + SMS), disposes Supabase sync/async HTTP clients, and disposes both DB engines.
 
+**Overlapping Bookings Allowed (business rule)**: The same property can be shown to and booked by multiple people for the same or overlapping dates. Do NOT add date-overlap conflict checks, double-booking guards, or DB exclusion constraints on bookings. `check_availability` in `app/services/booking.py` only validates that the property exists and that the guest count fits `max_occupancy`.
+
 ### Service Layer Pattern
 ```python
 class PropertyService:

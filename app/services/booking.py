@@ -219,23 +219,13 @@ async def add_review(db: AsyncSession, review_data: BookingReview):
     return False
 
 async def check_availability(db: AsyncSession, property_id: int, check_in_date: str, check_out_date: str, guests: int):
-    """Check if property is available for booking"""
-    check_in = datetime.fromisoformat(check_in_date)
-    check_out = datetime.fromisoformat(check_out_date)
+    """Check if property is available for booking.
 
-    # Check for overlapping bookings (include pending to prevent double-booking)
-    stmt = select(Booking).where(
-        and_(
-            Booking.property_id == property_id,
-            Booking.booking_status.in_([BookingStatus.pending, BookingStatus.confirmed, BookingStatus.checked_in]),
-            # Check for date overlap
-            Booking.check_in_date < check_out,
-            Booking.check_out_date > check_in
-        )
-    )
-    result = await db.execute(stmt)
-    overlapping_bookings = result.scalars().all()
-
+    Business rule: overlapping bookings are allowed — the same property can be
+    shown to (and booked by) multiple people for the same dates. Availability
+    only depends on the property existing and the guest count fitting
+    max_occupancy.
+    """
     # Get property max occupancy
     prop_stmt = select(Property).where(Property.id == property_id)
     prop_result = await db.execute(prop_stmt)
@@ -243,9 +233,6 @@ async def check_availability(db: AsyncSession, property_id: int, check_in_date: 
 
     if not property_obj:
         return {"available": False, "reason": "Property not found"}
-
-    if overlapping_bookings:
-        return {"available": False, "reason": "Property already booked for these dates"}
 
     if property_obj.max_occupancy and guests > property_obj.max_occupancy:
         logger.info(
@@ -264,7 +251,6 @@ async def check_availability(db: AsyncSession, property_id: int, check_in_date: 
             "property_id": property_id, "guests": guests,
             "max_occupancy": property_obj.max_occupancy,
             "check_in": check_in_date, "check_out": check_out_date,
-            "overlapping_bookings": len(overlapping_bookings),
         },
     )
     return {"available": True, "max_occupancy": property_obj.max_occupancy}

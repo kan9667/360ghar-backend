@@ -101,8 +101,11 @@ class OAuthTokenStore:
             logger.debug("Auth code retrieved and consumed", extra={"user_id": data.get("user_id")})
             return dict[str, Any](data)
         except Exception as e:
+            # Surface infrastructure failures (e.g. cache backend down) instead of
+            # returning None, which the token endpoint would misreport as
+            # invalid_grant and hide outages from operators.
             logger.error("Failed to get auth code: %s", e)
-            return None
+            raise OAuthStorageError(f"Failed to get auth code: {e}") from e
 
     async def delete_auth_code(self, code: str) -> bool:
         try:

@@ -8,7 +8,7 @@ import time
 from collections import defaultdict
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -401,7 +401,14 @@ async def like_tour(
             detail="Tour not found"
         )
 
-    tour.like_count = (tour.like_count or 0) + 1
+    new_like_count = (
+        await db.execute(
+            update(Tour)
+            .where(Tour.id == tour_id)
+            .values(like_count=func.coalesce(Tour.like_count, 0) + 1)
+            .returning(Tour.like_count)
+        )
+    ).scalar_one()
     await db.commit()
 
     try:
@@ -422,7 +429,7 @@ async def like_tour(
     except Exception as e:
         logger.warning("Failed to track like event for tour %s: %s", tour_id, e)
 
-    return {"like_count": tour.like_count}
+    return {"like_count": new_like_count}
 
 
 @router.delete("/tours/{tour_id}/like")
@@ -460,7 +467,14 @@ async def unlike_tour(
             detail="Tour not found"
         )
 
-    tour.like_count = max((tour.like_count or 0) - 1, 0)
+    new_like_count = (
+        await db.execute(
+            update(Tour)
+            .where(Tour.id == tour_id)
+            .values(like_count=func.greatest(func.coalesce(Tour.like_count, 0) - 1, 0))
+            .returning(Tour.like_count)
+        )
+    ).scalar_one()
     await db.commit()
 
     try:
@@ -481,4 +495,4 @@ async def unlike_tour(
     except Exception as e:
         logger.warning("Failed to track unlike event for tour %s: %s", tour_id, e)
 
-    return {"like_count": tour.like_count}
+    return {"like_count": new_like_count}
