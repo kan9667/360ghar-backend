@@ -13,10 +13,13 @@ Individual scheduler modules no longer create their own
 
 from __future__ import annotations
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from typing import TYPE_CHECKING
 
 from app.config import settings
 from app.core.logging import get_logger
+
+if TYPE_CHECKING:
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 logger = get_logger(__name__)
 
@@ -27,6 +30,11 @@ def get_scheduler() -> AsyncIOScheduler:
     """Return the shared scheduler instance (creates it lazily)."""
     global _scheduler
     if _scheduler is None:
+        # Imported lazily so the heavy ``apscheduler`` package (and its
+        # tzdata/deps) do not load at app import time — only when a
+        # scheduler is actually requested (never in serverless mode).
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
         tz = getattr(settings, "NOTIF_SCHED_TZ", None) or "Asia/Kolkata"
         _scheduler = AsyncIOScheduler(timezone=tz)
     return _scheduler

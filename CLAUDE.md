@@ -448,7 +448,7 @@ Dev dependencies (pytest, ruff, mypy) are in the `dev` optional group: `uv sync 
 - Phone as primary identifier
 - Role-based access: user, agent, admin
 - Backend does not provide `/api/v1/auth/*` user-session endpoints; clients own login/refresh/logout via Supabase SDK
-- Rate limiting: 100 req/min global (sliding window via `app/middleware/rate_limit.py`)
+- Rate limiting: 500 req/min global per IP (sliding window via `app/middleware/rate_limit.py`). Tighter per-route limits applied via `EndpointRateLimiter` on sensitive endpoints (e.g. 60 req/min for the public identifier-status probe). SSE streaming endpoints are exempt (held-open connections would otherwise consume a client's per-IP budget).
 - Input validation via Pydantic schemas
 - API key validation via `VALID_API_KEYS` setting
 - OAuth 2.1 token storage via CacheManager (Redis/memory backends, `app/services/oauth_token_store.py`)

@@ -281,7 +281,7 @@ async def list_conversations(db: AsyncSession, user_id: int) -> list[dict[str, A
         qna_by_match: dict[int, list[MatchQnAAnswer]] = defaultdict(list)
         for ans in qna_answers:
             qna_by_match[ans.match_id].append(ans)
-        
+
         for peer, mid in match_id_map.items():
             answers = qna_by_match.get(mid, [])
             answer_map = {ans.user_id: ans for ans in answers}

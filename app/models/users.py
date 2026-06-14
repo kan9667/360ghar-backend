@@ -23,15 +23,9 @@ from sqlalchemy.types import Enum as SQLEnum
 from app.core.database import Base
 from app.models.enums import (
     AuthMethod,
-    Cleanliness,
     FlatmatesMode,
     FlatmatesProfileStatus,
-    FoodHabits,
-    GuestsPolicy,
-    SleepSchedule,
-    SmokingDrinking,
     UserRole,
-    WorkStyle,
 )
 
 if TYPE_CHECKING:
@@ -81,7 +75,10 @@ class User(Base):
     privacy_settings: Mapped[dict | None] = mapped_column(JSON, default=dict)
     flatmates_mode: Mapped[FlatmatesMode | None] = mapped_column(SQLEnum(FlatmatesMode, name='flatmates_mode'), nullable=True)
     flatmates_profile_status: Mapped[FlatmatesProfileStatus] = mapped_column(SQLEnum(FlatmatesProfileStatus, name='flatmates_profile_status'), default=FlatmatesProfileStatus.draft)
-    flatmates_onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    flatmates_onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    stays_onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    estate_onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    ghar360_onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     flatmates_bio: Mapped[str | None] = mapped_column(Text, nullable=True)
     flatmates_budget_min: Mapped[float | None] = mapped_column(Float, nullable=True)
     flatmates_budget_max: Mapped[float | None] = mapped_column(Float, nullable=True)

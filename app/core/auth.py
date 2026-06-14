@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import socket
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpcore
 import httpx
@@ -17,9 +17,28 @@ from app.config import settings
 from app.core.http import get_supabase_auth_http_client
 from app.core.jwt_verification import JWKSUnavailable, verify_jwt_locally
 from app.core.logging import get_logger
-from supabase import Client, ClientOptions, create_client
+
+if TYPE_CHECKING:
+    # ``Client`` / ``ClientOptions`` are used only as type annotations. With
+    # ``from __future__ import annotations`` they are lazy strings, so the
+    # heavy ``supabase`` package does not need to load at import time.
+    from supabase import Client, ClientOptions
 
 logger = get_logger(__name__)
+
+
+def create_client(*args: Any, **kwargs: Any) -> Client:
+    """Lazily resolve ``supabase.create_client``.
+
+    The ``supabase`` package (~25MB) is only needed when a Supabase client is
+    first built at runtime, so we keep it off the app import path. Exposing
+    this thin wrapper at module scope preserves the ``app.core.auth.create_client``
+    seam that tests patch.
+    """
+    from supabase import create_client as _supabase_create_client
+
+    return _supabase_create_client(*args, **kwargs)
+
 
 SUPABASE_AUTH_TIMEOUT = 10.0
 SUPABASE_DATA_TIMEOUT = 120.0
@@ -104,6 +123,9 @@ class SupabaseClientManager:
                 raise ValueError(
                     "Missing Supabase publishable key. Set SUPABASE_PUBLISHABLE_KEY."
                 )
+            # ``create_client`` resolves to the module-level lazy wrapper above,
+            # which imports the heavy ``supabase`` package only on first use and
+            # stays patchable as ``app.core.auth.create_client``.
             self._auth_client = create_client(
                 settings.SUPABASE_URL,
                 key,
@@ -463,6 +485,8 @@ class SupabaseClientManager:
 
     @classmethod
     def _build_client_options(cls, timeout: float) -> ClientOptions:
+        from supabase import ClientOptions
+
         return ClientOptions(httpx_client=cls._build_supabase_http_client(timeout))
 
 

@@ -37,6 +37,7 @@ async def get_scene(
 
 
 @router.put("/{scene_id}", response_model=Scene)
+@router.patch("/{scene_id}", response_model=Scene)
 async def update_scene(
     scene_id: str,
     scene_data: SceneUpdate,

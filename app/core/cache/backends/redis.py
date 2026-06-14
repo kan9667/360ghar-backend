@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import json
 import pickle
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import redis.asyncio as redis
+if TYPE_CHECKING:
+    import redis.asyncio as redis
 
 from app.core.cache.interface import CacheStats
 from app.core.logging import get_logger
@@ -52,6 +53,12 @@ class RedisCacheBackend:
     async def connect(self) -> None:
         """Initialize Redis connection pool."""
         try:
+            # Imported lazily so ``redis.asyncio`` (and its deps) only load
+            # when the Redis backend is actually selected. In serverless /
+            # memory-cache mode this module is never instantiated, so the
+            # heavy ``redis`` package never loads at startup.
+            import redis.asyncio as redis
+
             self._client = redis.from_url(
                 self._redis_url,
                 encoding="utf-8",

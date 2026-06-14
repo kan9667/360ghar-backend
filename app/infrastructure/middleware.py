@@ -64,12 +64,12 @@ def register_middleware(app: FastAPI, *, testing: bool) -> None:
         max_age=CORS_MAX_AGE_SECONDS,
     )
 
-    # Rate limiting: 100 requests per minute per IP for general endpoints.
+    # Rate limiting: 500 requests per minute per IP for general endpoints.
     # For stricter auth-endpoint limiting, use EndpointRateLimiter decorator
-    # on individual routes (30 req/min).
+    # on individual routes (60 req/min).
     app.add_middleware(
         RateLimitMiddleware,
-        calls=100,
+        calls=500,
         period=60,
         scope="global",
     )

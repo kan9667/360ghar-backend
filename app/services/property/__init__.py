@@ -23,8 +23,13 @@ from app.services.property.search import (
     TEXT_WEIGHT,
     VECTOR_WEIGHT,
     get_unified_properties_optimized,
-    property_embeddings_table,
 )
+
+# ``property_embeddings_table`` is intentionally NOT re-exported eagerly: it is
+# built lazily (via ``search._get_property_embeddings_table``) on first semantic
+# search so that ``pgvector``/``numpy`` stay out of startup RAM. Access it via
+# ``app.services.property.search.property_embeddings_table`` (PEP 562 lazy) or
+# ``search._get_property_embeddings_table()``.
 
 __all__ = [
     # CRUD
@@ -37,7 +42,6 @@ __all__ = [
     "update_property",
     # Search
     "get_unified_properties_optimized",
-    "property_embeddings_table",
     "VECTOR_WEIGHT",
     "TEXT_WEIGHT",
     # Recommendations

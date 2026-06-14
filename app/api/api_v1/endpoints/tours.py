@@ -98,6 +98,7 @@ async def get_tour(
 
 
 @router.put("/{tour_id}", response_model=Tour)
+@router.patch("/{tour_id}", response_model=Tour)
 async def update_tour(
     tour_id: str,
     tour_data: TourUpdate,
@@ -249,6 +250,7 @@ async def create_scene(
 
 
 @router.put("/{tour_id}/scenes/reorder", response_model=list[Scene])
+@router.post("/{tour_id}/scenes/reorder", response_model=list[Scene])
 async def reorder_scenes(
     tour_id: str,
     reorder_data: SceneReorder,

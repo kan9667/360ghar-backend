@@ -6,7 +6,6 @@ from app.api.api_v1.dependencies.auth import (
     get_current_active_user,
     get_current_admin,
 )
-from app.core.auth import AuthFailureReason, _is_failure
 from app.core.database import get_db
 from app.core.exceptions import ConflictException
 from app.core.logging import get_logger
@@ -24,6 +23,7 @@ from app.schemas.user import User as UserSchema
 from app.services.agent import assign_agent_to_user
 from app.services.storage import storage_service
 from app.services.user import (
+    complete_app_onboarding,
     compute_auth_gate_state,
     get_all_users,
     get_user_by_id,
@@ -46,7 +46,7 @@ async def get_user_me(current_user: User = Depends(get_current_active_user)):
 
 @router.get("/me/auth-state")
 async def get_auth_state(
-    app: str = Query("flatmates", description="App slug for onboarding check"),
+    app: str = Query("flatmates", min_length=1, description="App slug for onboarding check"),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -63,6 +63,21 @@ async def get_auth_state(
     :func:`register_app_onboarding_check` during startup.
     """
     return await compute_auth_gate_state(db, current_user, app=app)
+
+
+@router.post("/me/onboarding", response_model=UserSchema)
+async def complete_onboarding(
+    app: str = Query(..., min_length=1, description="App slug whose onboarding to complete"),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark the given app's onboarding as complete.
+
+    Sets ``<app>_onboarding_completed = True`` on the current user so the gate
+    advances past ``app_onboarding`` on subsequent ``GET /me/auth-state`` calls.
+    """
+    updated = await complete_app_onboarding(db, current_user, app=app)
+    return UserSchema.model_validate(updated)
 
 
 @router.get("/me/identities")
@@ -99,9 +114,9 @@ async def delete_user_account(
     the local row (sets ``is_active = False`` and preserves the record for
     referential integrity with properties/visits/bookings).
     """
-    from app.core.auth import _manager
-    from app.config import settings
     import httpx
+
+    from app.config import settings
 
     supabase_user_id = current_user.supabase_user_id
     admin_url = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/admin/users/{supabase_user_id}"

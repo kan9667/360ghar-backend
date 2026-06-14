@@ -699,3 +699,167 @@ class TestUpdateUser:
 
         assert exc_info.value.status_code == 500
         assert exc_info.value.detail == "Internal server error occurred while updating user"
+
+
+class TestCompleteAppOnboarding:
+    """Tests for complete_app_onboarding and the multi-app onboarding registry.
+
+    Mock-based (no DB): ``complete_app_onboarding`` only setattr's a column,
+    flushes, and refreshes, so a mocked session + a transient User is enough and
+    keeps these tests PostGIS-independent.
+    """
+
+    def _make_user(self) -> User:
+        return User(
+            id=1,
+            supabase_user_id=str(uuid.uuid4()),
+            email="onboard@example.com",
+            full_name="Onboard User",
+            role=UserRole.user.value,
+            is_active=True,
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "app,column",
+        [
+            ("flatmates", "flatmates_onboarding_completed"),
+            ("stays", "stays_onboarding_completed"),
+            ("estate", "estate_onboarding_completed"),
+        ],
+    )
+    async def test_sets_correct_column_and_returns_user(self, app, column):
+        from app.services.user import complete_app_onboarding
+
+        db = AsyncMock(spec=AsyncSession)
+        user = self._make_user()
+
+        result = await complete_app_onboarding(db, user, app=app)
+
+        assert result is user
+        assert getattr(result, column) is True
+        db.flush.assert_awaited_once()
+        db.refresh.assert_awaited_once_with(user)
+
+    @pytest.mark.asyncio
+    async def test_unknown_slug_raises_bad_request(self):
+        from app.core.exceptions import BadRequestException
+        from app.services.user import complete_app_onboarding
+
+        with pytest.raises(BadRequestException):
+            await complete_app_onboarding(
+                AsyncMock(spec=AsyncSession), self._make_user(), app="unknown-app"
+            )
+
+    @pytest.mark.asyncio
+    async def test_ghar360_has_no_onboarding_flow(self):
+        """ghar360 has no auth-level onboarding; completing it must 400."""
+        from app.core.exceptions import BadRequestException
+        from app.services.user import complete_app_onboarding
+
+        with pytest.raises(BadRequestException):
+            await complete_app_onboarding(
+                AsyncMock(spec=AsyncSession), self._make_user(), app="ghar360"
+            )
+
+
+class TestComputeAuthGateState:
+    """Tests for compute_auth_gate_state — the auth gate state machine."""
+
+    def _make_profiled_user(self) -> User:
+        """A verified, fully-profiled user that clears the first three gates."""
+        from datetime import datetime, timezone
+
+        return User(
+            id=1,
+            supabase_user_id=str(uuid.uuid4()),
+            email="gate@example.com",
+            phone="+919000000077",
+            full_name="Gate User",
+            date_of_birth=datetime(1995, 1, 1, tzinfo=timezone.utc),
+            role=UserRole.user.value,
+            is_active=True,
+            email_verified=True,
+            phone_verified=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_app_onboarding_stage_when_incomplete(self):
+        from app.services.user import compute_auth_gate_state
+
+        user = self._make_profiled_user()
+        with patch(
+            "app.services.user._check_user_has_password",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            result = await compute_auth_gate_state(
+                AsyncMock(spec=AsyncSession), user, app="flatmates"
+            )
+
+        assert result["stage"] == "app_onboarding"
+        assert result["next_action"] == "complete_onboarding"
+        assert result["missing_fields"] == []
+
+    @pytest.mark.asyncio
+    async def test_active_after_completing_onboarding(self):
+        from app.services.user import complete_app_onboarding, compute_auth_gate_state
+
+        user = self._make_profiled_user()
+        db = AsyncMock(spec=AsyncSession)
+        await complete_app_onboarding(db, user, app="flatmates")
+
+        with patch(
+            "app.services.user._check_user_has_password",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            result = await compute_auth_gate_state(db, user, app="flatmates")
+
+        assert result["stage"] == "active"
+        assert result["next_action"] == "grant_access"
+
+    @pytest.mark.asyncio
+    async def test_failing_onboarding_check_defaults_to_incomplete(self, monkeypatch):
+        """A registered check that raises must fail closed → app_onboarding."""
+
+        def _raising_check(_user: User) -> bool:
+            raise RuntimeError("boom")
+
+        from app.services.user import _APP_ONBOARDING_CHECKS, compute_auth_gate_state
+
+        user = self._make_profiled_user()
+        monkeypatch.setitem(_APP_ONBOARDING_CHECKS, "broken-app", _raising_check)
+
+        with patch(
+            "app.services.user._check_user_has_password",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            result = await compute_auth_gate_state(
+                AsyncMock(spec=AsyncSession), user, app="broken-app"
+            )
+
+        assert result["stage"] == "app_onboarding"
+        assert result["next_action"] == "complete_onboarding"
+
+    @pytest.mark.asyncio
+    async def test_per_app_profile_field_override(self, monkeypatch):
+        """Apps can override the mandatory profile fields via _APP_PROFILE_FIELDS."""
+        from app.services.user import _APP_PROFILE_FIELDS, compute_auth_gate_state
+
+        user = self._make_profiled_user()
+        # estate requires a company_name the profiled user lacks.
+        monkeypatch.setitem(_APP_PROFILE_FIELDS, "estate", ("full_name", "company_name"))
+
+        with patch(
+            "app.services.user._check_user_has_password",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            result = await compute_auth_gate_state(
+                AsyncMock(spec=AsyncSession), user, app="estate"
+            )
+
+        assert result["stage"] == "profile_completion"
+        assert "company_name" in result["missing_fields"]

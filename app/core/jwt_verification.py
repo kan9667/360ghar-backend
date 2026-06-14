@@ -16,7 +16,6 @@ import hashlib
 import time
 from typing import Any
 
-import httpx
 import jwt
 from jwt import InvalidTokenError
 from jwt.algorithms import RSAAlgorithm

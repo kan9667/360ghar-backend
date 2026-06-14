@@ -17,9 +17,9 @@ class TestRateLimitMiddleware:
         from app.middleware.rate_limit import RateLimitMiddleware
 
         app = FastAPI()
-        middleware = RateLimitMiddleware(app, calls=100, period=60, scope="global")
+        middleware = RateLimitMiddleware(app, calls=500, period=60, scope="global")
 
-        assert middleware.calls == 100
+        assert middleware.calls == 500
         assert middleware.period == 60
         assert middleware.scope == "global"
 
@@ -30,7 +30,15 @@ class TestRateLimitMiddleware:
         app = FastAPI()
         middleware = RateLimitMiddleware(app)
 
-        exempt_paths = ["/", "/health", "/docs", "/redoc", "/openapi.json"]
+        exempt_paths = [
+            "/",
+            "/health",
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            "/api/v1/flatmates/sse",
+            "/api/v1/notifications/sse",
+        ]
         for path in exempt_paths:
             assert middleware._is_exempt_path(path) is True
 
@@ -99,7 +107,7 @@ class TestRateLimitIntegration:
         async def test_endpoint():
             return {"message": "ok"}
 
-        app.add_middleware(RateLimitMiddleware, calls=100, period=60)
+        app.add_middleware(RateLimitMiddleware, calls=500, period=60)
 
         with patch("app.middleware.rate_limit.get_cache_manager") as mock_cache:
             mock_manager = AsyncMock()

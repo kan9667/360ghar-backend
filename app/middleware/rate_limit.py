@@ -105,6 +105,17 @@ class RateLimitMiddleware:
         if path.startswith("/mcp"):
             return True
 
+        # SSE endpoints are long-lived streaming connections: a single held-open
+        # connection would otherwise consume a client's per-IP request budget on
+        # connect. List them explicitly so new routes can't be silently exempted
+        # by an accidental ``/sse`` suffix match.
+        sse_paths = {
+            "/api/v1/flatmates/sse",
+            "/api/v1/notifications/sse",
+        }
+        if path in sse_paths:
+            return True
+
         return False
 
     def _get_client_id_from_scope(self, scope: Scope) -> str:

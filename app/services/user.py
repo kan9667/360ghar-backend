@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
@@ -433,16 +434,45 @@ async def get_identifier_status(db: AsyncSession, identifier: str) -> dict[str, 
 
 
 # Mandatory profile fields for the PROFILE_COMPLETION gate.
+# Default applies to all apps unless overridden in _APP_PROFILE_FIELDS.
 _PROFILE_REQUIRED_FIELDS: tuple[str, ...] = ("full_name", "date_of_birth")
+
+# Per-app profile field overrides.  Apps not listed use the default above.
+_APP_PROFILE_FIELDS: dict[str, tuple[str, ...]] = {
+    # "estate": ("full_name", "date_of_birth", "company_name"),  # example
+}
 
 
 # ── Multi-app onboarding registry ────────────────────────────────────────────
 # Each app registers a callable that inspects the live User row and returns
 # True when that app's onboarding is complete.  New apps call
 # ``register_app_onboarding_check("stays", fn)`` during startup.
+#
+# All four consumer apps are registered here.  The check is a simple boolean
+# column on the users table; more complex apps can override via
+# ``register_app_onboarding_check`` at startup.
 
 _APP_ONBOARDING_CHECKS: dict[str, Callable[[User], bool]] = {
-    "flatmates": lambda u: bool(u.flatmates_onboarding_completed),
+    "flatmates": lambda u: bool(getattr(u, "flatmates_onboarding_completed", False)),
+    "stays": lambda u: bool(getattr(u, "stays_onboarding_completed", False)),
+    "estate": lambda u: bool(getattr(u, "estate_onboarding_completed", False)),
+    # NOTE: ghar360 has no auth-level onboarding flow (its first-launch intro
+    # is handled locally via GetStorage hasSeenOnboarding). It is intentionally
+    # absent so the gate never returns app_onboarding for it; the column
+    # ``ghar360_onboarding_completed`` exists for future use.
+}
+
+# Maps an app slug to the User column that records its onboarding completion.
+# Used by :func:`complete_app_onboarding` to persist completion. Must stay in
+# sync with ``_APP_ONBOARDING_CHECKS``: only apps with an actual onboarding
+# flow belong here. ``ghar360`` is intentionally absent (no auth-level
+# onboarding — see the NOTE above), so completing it raises
+# ``BadRequestException``. The ``ghar360_onboarding_completed`` column is kept
+# for future use.
+_APP_ONBOARDING_COLUMNS: dict[str, str] = {
+    "flatmates": "flatmates_onboarding_completed",
+    "stays": "stays_onboarding_completed",
+    "estate": "estate_onboarding_completed",
 }
 
 
@@ -453,6 +483,23 @@ def register_app_onboarding_check(app: str, check: Callable[[User], bool]) -> No
     when that app's onboarding is complete.
     """
     _APP_ONBOARDING_CHECKS[app] = check
+
+
+async def complete_app_onboarding(db: AsyncSession, user: User, *, app: str) -> User:
+    """Mark the given app's onboarding as complete for ``user``.
+
+    Sets the matching ``<app>_onboarding_completed`` column to ``True`` and
+    returns the refreshed user.  Raises :class:`BadRequestException` if the
+    app slug is unknown (no onboarding flow to complete).
+    """
+    column = _APP_ONBOARDING_COLUMNS.get(app)
+    if column is None:
+        raise BadRequestException(detail=f"Unknown app slug: {app}")
+    logger.info("Marking onboarding complete for user %s app=%s", user.id, app)
+    setattr(user, column, True)
+    await db.flush()
+    await db.refresh(user)
+    return user
 
 
 async def compute_auth_gate_state(
@@ -492,9 +539,10 @@ async def compute_auth_gate_state(
         }
 
     # ── PROFILE_COMPLETION: are all mandatory fields present? ────────────
+    profile_fields = _APP_PROFILE_FIELDS.get(app, _PROFILE_REQUIRED_FIELDS)
     missing = [
         field
-        for field in _PROFILE_REQUIRED_FIELDS
+        for field in profile_fields
         if not getattr(user, field, None)
     ]
     if missing:
@@ -506,7 +554,17 @@ async def compute_auth_gate_state(
 
     # ── APP_ONBOARDING: look up the app-specific check from the registry. ─
     onboarding_check = _APP_ONBOARDING_CHECKS.get(app, lambda u: True)
-    if not onboarding_check(user):
+    try:
+        onboarding_complete = onboarding_check(user)
+    except Exception as exc:  # noqa: BLE001  fail closed for the auth gate
+        logger.warning(
+            "Onboarding check failed for app=%s user=%s (err=%s), defaulting to incomplete",
+            app,
+            user.id,
+            type(exc).__name__,
+        )
+        onboarding_complete = False
+    if not onboarding_complete:
         return {
             "stage": "app_onboarding",
             "next_action": "complete_onboarding",

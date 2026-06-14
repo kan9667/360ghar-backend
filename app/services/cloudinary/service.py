@@ -4,12 +4,6 @@ import io
 from pathlib import Path
 from typing import Any
 
-import cloudinary
-import cloudinary.http_client  # noqa: E402
-from cloudinary import api as cloudinary_api
-from cloudinary import uploader
-from cloudinary.utils import cloudinary_url
-
 from app.config import settings
 from app.core.exceptions import StorageException
 from app.core.logging import get_logger
@@ -18,16 +12,17 @@ logger = get_logger(__name__)
 
 CLOUDINARY_ROOT = "360ghar"
 
-# Increase Cloudinary's urllib3 connection pool
-try:
-    import urllib3
-    urllib3_http = urllib3.PoolManager(maxsize=20)
-    cloudinary.http_client._session = urllib3_http
-except Exception:
-    pass
-
 
 def _configure():
+    """Configure the cloudinary SDK.
+
+    Imported lazily so the heavy ``cloudinary`` package is only loaded the first
+    time a CloudinaryService is instantiated (i.e. on first use), not at import
+    time of this module.
+    """
+    import cloudinary
+    import cloudinary.http_client  # noqa: F401
+
     cloudinary.config(
         cloud_name=settings.CLOUDINARY_CLOUD_NAME,
         api_key=settings.CLOUDINARY_API_KEY,
@@ -37,7 +32,36 @@ def _configure():
 
 
 class CloudinaryService:
+    """Wrapper over the Cloudinary SDK for upload / delete / URL / transform ops.
+
+    The SDK is imported lazily on first instantiation; the instance attributes
+    ``_cloudinary``, ``_api``, ``_uploader`` and ``_url`` bind the SDK handles so
+    method bodies resolve them without re-importing.
+    """
+
     def __init__(self):
+        # Imported here (not at module top) so that ``cloudinary`` (~12MB) is
+        # only loaded when a service is actually instantiated at runtime.
+        import cloudinary
+        import cloudinary.http_client  # noqa: F401
+        from cloudinary import api as cloudinary_api
+        from cloudinary import uploader
+        from cloudinary.utils import cloudinary_url
+
+        # Bind to instance so method bodies resolve them without re-importing.
+        self._cloudinary = cloudinary
+        self._api = cloudinary_api
+        self._uploader = uploader
+        self._url = cloudinary_url
+
+        # Increase Cloudinary's urllib3 connection pool (best-effort).
+        try:
+            import urllib3
+
+            cloudinary.http_client._session = urllib3.PoolManager(maxsize=20)
+        except Exception:
+            pass
+
         _configure()
         self.root = CLOUDINARY_ROOT
 
@@ -78,9 +102,9 @@ class CloudinaryService:
             options.update(extra_options)
 
             if isinstance(file_bytes, bytes):
-                result = uploader.upload(io.BytesIO(file_bytes), **options)
+                result = self._uploader.upload(io.BytesIO(file_bytes), **options)
             else:
-                result = uploader.upload(file_bytes, **options)
+                result = self._uploader.upload(file_bytes, **options)
 
             secure_url: str = result.get("secure_url", "")
             return {
@@ -116,7 +140,7 @@ class CloudinaryService:
             else:
                 options["resource_type"] = "raw"
 
-            result = uploader.upload(str(local_path), **options)
+            result = self._uploader.upload(str(local_path), **options)
             return {
                 "public_id": result.get("public_id", full_public_id),
                 "secure_url": result.get("secure_url", ""),
@@ -138,7 +162,7 @@ class CloudinaryService:
     ) -> dict[str, Any]:
         try:
             full_public_id = self._public_id(self.root, folder or "", public_id)
-            result = uploader.upload(
+            result = self._uploader.upload(
                 url,
                 public_id=full_public_id,
                 overwrite=True,
@@ -160,7 +184,7 @@ class CloudinaryService:
 
     def delete_file(self, public_id: str) -> bool:
         try:
-            result = cloudinary_api.delete_resources([public_id], resource_type="auto")
+            result = self._api.delete_resources([public_id], resource_type="auto")
             deleted = result.get("deleted", {})
             return deleted.get(public_id) == "deleted"
         except Exception as e:
@@ -190,7 +214,7 @@ class CloudinaryService:
                 t["height"] = height
             t["crop"] = crop or "fit"
             transformations.append(t)
-        url, _ = cloudinary_url(
+        url, _ = self._url(
             public_id,
             transformation=transformations,
             secure=True,
@@ -209,7 +233,7 @@ class CloudinaryService:
 
     def get_file_info(self, public_id: str) -> dict[str, Any] | None:
         try:
-            result = cloudinary_api.resource(public_id, resource_type="auto")
+            result = self._api.resource(public_id, resource_type="auto")
             return {
                 "public_id": result.get("public_id", ""),
                 "bytes": result.get("bytes", 0),
@@ -232,4 +256,16 @@ class CloudinaryService:
         return "raw"
 
 
-cloudinary_service = CloudinaryService()
+# Lazy singleton. The ``cloudinary_service`` name is resolved lazily via the
+# package-level ``__getattr__`` in ``app/services/cloudinary/__init__.py`` so
+# that merely importing this module (or the package) does NOT load the heavy
+# ``cloudinary`` package. The singleton is built on first attribute access.
+_cloudinary_service_instance: CloudinaryService | None = None
+
+
+def get_cloudinary_service() -> CloudinaryService:
+    """Return the process-wide CloudinaryService singleton, building it lazily."""
+    global _cloudinary_service_instance  # noqa: PLW0603
+    if _cloudinary_service_instance is None:
+        _cloudinary_service_instance = CloudinaryService()
+    return _cloudinary_service_instance

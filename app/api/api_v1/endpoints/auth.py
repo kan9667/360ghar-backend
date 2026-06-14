@@ -33,7 +33,7 @@ router = APIRouter()
 
 # Per-IP guard for the public identifier-status probe. Reuses the project's
 # EndpointRateLimiter (cache-backed, sliding window).
-_identifier_status_limiter = EndpointRateLimiter(calls=30, period=60)
+_identifier_status_limiter = EndpointRateLimiter(calls=60, period=60)
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────

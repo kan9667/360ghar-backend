@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import UploadFile
 from sqlalchemy import select
@@ -19,7 +19,7 @@ from app.core.exceptions import (
 from app.core.logging import get_logger
 from app.models.tours import MediaFile
 from app.services import image_processing
-from app.services.cloudinary import cloudinary_service
+from app.services.cloudinary import get_cloudinary_service
 from app.services.storage_paths import (
     StorageFolder,
     generate_cloudinary_public_id,
@@ -39,6 +39,9 @@ from .helpers import (
 from .processing import process_existing_scene_image as _process_existing_scene_image
 from .processing import upload_scene_image as _upload_scene_image
 
+if TYPE_CHECKING:
+    from app.services.cloudinary.service import CloudinaryService
+
 logger = get_logger(__name__)
 
 OPTIMIZE_SETTINGS: dict[StorageFolder, tuple[int, int]] = {
@@ -51,12 +54,24 @@ OPTIMIZE_SETTINGS: dict[StorageFolder, tuple[int, int]] = {
 
 class StorageService:
     def __init__(self):
-        self.cloudinary = cloudinary_service
+        # ``self.cloudinary`` is NOT resolved here: building the CloudinaryService
+        # singleton loads the heavy ``cloudinary`` package (~12MB). It is resolved
+        # lazily via the ``cloudinary`` property on first real use, so importing
+        # this module (and the eager ``storage_service`` singleton below) does
+        # not pull cloudinary into RAM at startup.
+        self._cloudinary: CloudinaryService | None = None
         self._valid_image_types = VALID_IMAGE_TYPES
         self._valid_audio_types = VALID_AUDIO_TYPES
         self._valid_video_types = VALID_VIDEO_TYPES
         self._valid_document_types = VALID_DOCUMENT_TYPES
         self._max_upload_bytes = get_max_upload_bytes()
+
+    @property
+    def cloudinary(self) -> CloudinaryService:
+        """Lazy CloudinaryService accessor — built on first call."""
+        if self._cloudinary is None:
+            self._cloudinary = get_cloudinary_service()
+        return self._cloudinary
 
     # ============================================================
     # User-Scoped Upload Methods

@@ -6,7 +6,6 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Column,
     Integer,
@@ -32,20 +31,45 @@ from app.schemas.property import Property as PropertySchema
 from app.schemas.property import SortBy, UnifiedPropertyFilter
 from app.vector.embedding_client import embed_query
 
-vector_metadata = MetaData()
-property_embeddings_table = Table(
-    "property_embeddings",
-    vector_metadata,
-    Column("property_id", Integer, primary_key=True),
-    Column("embedding", Vector(768)),
-    schema="public",
-)
+_vector_metadata = MetaData()
+_property_embeddings_table: Table | None = None
 
 # Default weights for hybrid relevance scoring
 VECTOR_WEIGHT = 0.6
 TEXT_WEIGHT = 0.4
 
 logger = get_logger(__name__)
+
+
+def _get_property_embeddings_table() -> Table:
+    """Lazily build the property_embeddings Table on first use.
+
+    Deferring the ``pgvector`` import (and the numpy it pulls in) out of module
+    import time keeps both off the startup RAM footprint; they only load when a
+    semantic search is actually performed.
+    """
+    global _property_embeddings_table
+    if _property_embeddings_table is None:
+        from pgvector.sqlalchemy import Vector
+
+        _property_embeddings_table = Table(
+            "property_embeddings",
+            _vector_metadata,
+            Column("property_id", Integer, primary_key=True),
+            Column("embedding", Vector(768)),
+            schema="public",
+        )
+    return _property_embeddings_table
+
+
+def __getattr__(name: str):  # PEP 562 module-level lazy attribute
+    if name == "property_embeddings_table":
+        return _get_property_embeddings_table()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals().keys(), "property_embeddings_table"})
 
 
 def _utc_day_start(value: datetime) -> datetime:
@@ -510,6 +534,11 @@ async def get_unified_properties_optimized(
             text_filter_applied = True
 
         if semantic_enabled and semantic_embedding:
+            # pgvector (and numpy) load lazily here on first semantic search.
+            from pgvector.sqlalchemy import Vector
+
+            property_embeddings_table = _get_property_embeddings_table()
+
             query = query.outerjoin(
                 property_embeddings_table, property_embeddings_table.c.property_id == Property.id
             )
