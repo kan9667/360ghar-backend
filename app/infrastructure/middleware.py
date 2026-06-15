@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.middleware.cache_control import CacheControlMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.security import (
     RequestIDMiddleware,
@@ -75,6 +76,7 @@ def register_middleware(app: FastAPI, *, testing: bool) -> None:
     )
 
     app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(CacheControlMiddleware)
     app.add_middleware(StripTrailingSlashMiddleware)
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(RequestLoggingMiddleware, prefix="")

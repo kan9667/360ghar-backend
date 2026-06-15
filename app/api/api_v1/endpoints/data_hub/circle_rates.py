@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
+from app.core.cache import cached
 from app.core.database import get_db
 from app.models.data_hub import BankRate, CircleRate
 from app.schemas.data_hub import (
@@ -58,15 +60,21 @@ async def list_circle_rates(
     }
 
 
-@router.get("/circle-rates/sectors", response_model=list[str])
-async def list_circle_rate_sectors(db: AsyncSession = Depends(get_db)):
-    """List distinct sector names from circle rates."""
+@cached("datahub:circle-rate-sectors", ttl=settings.CACHE_TTL_AMENITIES)
+async def list_circle_rate_sectors_cached(db: AsyncSession) -> list[str]:
+    """Cached version of list_circle_rate_sectors."""
     from sqlalchemy import distinct
 
     result = await db.execute(
         select(distinct(CircleRate.sector)).order_by(CircleRate.sector)
     )
     return [r for r in result.scalars().all() if r]
+
+
+@router.get("/circle-rates/sectors", response_model=list[str])
+async def list_circle_rate_sectors(db: AsyncSession = Depends(get_db)):
+    """List distinct sector names from circle rates (cached for 24 hours)."""
+    return await list_circle_rate_sectors_cached(db)
 
 
 @router.post("/circle-rates/calculate-duty", response_model=StampDutyCalculationResponse)

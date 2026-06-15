@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
+from app.core.cache import cached
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.models.data_hub import BankAuction, CourtAuction
@@ -23,9 +25,9 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
-@router.get("/auctions/banks", response_model=list[str])
-async def list_auction_banks(db: AsyncSession = Depends(get_db)):
-    """List distinct bank names from bank auctions."""
+@cached("datahub:auction-banks", ttl=settings.CACHE_TTL_AMENITIES)
+async def list_auction_banks_cached(db: AsyncSession) -> list[str]:
+    """Cached version of list_auction_banks."""
     from sqlalchemy import distinct
 
     result = await db.execute(
@@ -34,9 +36,15 @@ async def list_auction_banks(db: AsyncSession = Depends(get_db)):
     return [r for r in result.scalars().all() if r]
 
 
-@router.get("/auctions/cities", response_model=list[str])
-async def get_auction_cities(db: AsyncSession = Depends(get_db)):
-    """Return distinct city values from bank_auctions + court_auctions."""
+@router.get("/auctions/banks", response_model=list[str])
+async def list_auction_banks(db: AsyncSession = Depends(get_db)):
+    """List distinct bank names from bank auctions (cached for 24 hours)."""
+    return await list_auction_banks_cached(db)
+
+
+@cached("datahub:auction-cities", ttl=settings.CACHE_TTL_AMENITIES)
+async def get_auction_cities_cached(db: AsyncSession) -> list[str]:
+    """Cached version of get_auction_cities."""
     bank_cities = select(BankAuction.city).where(BankAuction.is_active)
     court_cities = select(CourtAuction.city).where(CourtAuction.is_active)
 
@@ -44,6 +52,12 @@ async def get_auction_cities(db: AsyncSession = Depends(get_db)):
     stmt = select(func.distinct(combined.c.city)).order_by(combined.c.city)
     result = await db.execute(stmt)
     return [row[0] for row in result.all() if row[0]]
+
+
+@router.get("/auctions/cities", response_model=list[str])
+async def get_auction_cities(db: AsyncSession = Depends(get_db)):
+    """Return distinct city values from bank_auctions + court_auctions (cached for 24 hours)."""
+    return await get_auction_cities_cached(db)
 
 
 @router.get("/auctions/source-categories")

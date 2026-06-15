@@ -28,18 +28,19 @@ logger = get_logger(__name__)
 
 
 async def _fetch_changed_properties(db: AsyncSession, since: datetime | None, limit: int) -> list[dict[str, Any]]:
-    # Pull necessary columns for composing text/metadata
+    # Only the columns consumed by build_embedding_text()/build_metadata() in
+    # compose.py — anything else (calendar_data, features, owner_*, view/like
+    # counters, deposit/rate breakdowns, floor/age details, etc.) ships bytes
+    # through the Supabase pooler for nothing. The change-detection hash is
+    # computed solely from the embedding text, so dropping unused columns does
+    # not affect embedding or watermark behaviour.
     cols = [
-        "id", "title", "description", "property_type", "purpose", "status",
-        "latitude", "longitude", "city", "state", "country", "pincode", "locality", "sub_locality", "landmark", "full_address",
-        "area_type",
-        "base_price", "price_per_sqft", "monthly_rent", "daily_rate", "security_deposit", "maintenance_charges",
-        "area_sqft", "bedrooms", "bathrooms", "balconies", "parking_spaces", "floor_number", "total_floors", "age_of_property",
-        "max_occupancy", "minimum_stay_days",
-        "features", "main_image_url", "virtual_tour_url", "floor_plan_url", "video_tour_url", "tags", "search_keywords",
-        "owner_id", "owner_name", "owner_contact", "builder_name",
-        "is_available", "available_from", "calendar_data", "view_count", "like_count", "interest_count",
-        "created_at", "updated_at"
+        "id", "title", "description", "property_type", "purpose", "status", "is_available",
+        "latitude", "longitude", "city", "state", "country", "pincode", "locality", "landmark",
+        "base_price", "monthly_rent", "area_sqft",
+        "bedrooms", "bathrooms", "parking_spaces",
+        "tags", "search_keywords", "main_image_url",
+        "created_at", "updated_at",
     ]
 
     where = "WHERE TRUE"

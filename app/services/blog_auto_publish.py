@@ -273,6 +273,7 @@ class DailyPerplexityBlogPublisher:
             select(BlogPost)
             .where(BlogPost.active.is_(True), BlogPost.created_at >= cutoff)
             .order_by(BlogPost.created_at.desc())
+            .limit(50)
         )
         posts = result.scalars().all()
         return [

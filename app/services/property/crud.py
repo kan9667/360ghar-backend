@@ -7,7 +7,8 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.cache import PropertyCacheManager
+from app.config import settings
+from app.core.cache import PropertyCacheManager, get_cache_manager
 from app.core.exceptions import (
     BadRequestException,
     InsufficientPermissionsError,
@@ -194,6 +195,18 @@ async def get_property(db: AsyncSession, property_id: int) -> PropertySchema:
     """Get a property with images and owner."""
     logger.debug("Fetching property %s", property_id)
 
+    # Serve from cache when available. This read (property + images + owner +
+    # amenities) runs on every detail-page view and every crawler hit on every
+    # sitemapped property URL, making it the dominant Supabase pooler-egress
+    # path; caching it keeps repeat views off Postgres entirely.
+    cache_key = PropertyCacheManager.detail_cache_key(property_id)
+    try:
+        cached = await get_cache_manager().get(cache_key)
+        if cached is not None:
+            return PropertySchema.model_validate(cached)
+    except Exception as cache_exc:  # noqa: BLE001
+        logger.warning("Property detail cache read failed for %s: %s", property_id, cache_exc)
+
     try:
         repo = PropertyRepository(db)
         property_obj = await repo.get_property_with_owner(property_id)
@@ -210,7 +223,16 @@ async def get_property(db: AsyncSession, property_id: int) -> PropertySchema:
                 "image_count": len(property_obj.images) if property_obj.images else 0,
             },
         )
-        return PropertySchema.model_validate(property_obj)
+        schema = PropertySchema.model_validate(property_obj)
+        try:
+            await get_cache_manager().set(
+                cache_key,
+                schema.model_dump(mode="json"),
+                ttl=settings.CACHE_TTL_PROPERTY_DETAIL,
+            )
+        except Exception as cache_exc:  # noqa: BLE001
+            logger.warning("Property detail cache write failed for %s: %s", property_id, cache_exc)
+        return schema
     except PropertyNotFoundException:
         raise
     except Exception as e:
@@ -358,6 +380,7 @@ async def update_property(
         repo = PropertyRepository(db)
         property_obj = await repo.get_property_with_owner(property_id)
         await PropertyCacheManager.invalidate_property_caches(property_id)
+        await PropertyCacheManager.invalidate_property_detail_cache(property_id)
 
         logger.info("Property %s updated successfully", property_id)
         return PropertySchema.model_validate(property_obj)
@@ -439,6 +462,7 @@ async def delete_property(db: AsyncSession, property_id: int, actor: UserSchema)
         await db.delete(property_obj)
         await db.flush()
         await PropertyCacheManager.invalidate_property_caches(property_id)
+        await PropertyCacheManager.invalidate_property_detail_cache(property_id)
         logger.info("Property %s deleted successfully", property_id)
         return True
     except Exception as e:
@@ -455,7 +479,15 @@ async def increment_property_view_count(db: AsyncSession, property_id: int):
         stmt = (
             update(Property)
             .where(Property.id == property_id)
-            .values(view_count=Property.view_count + 1)
+            .values(
+                view_count=Property.view_count + 1,
+                # Preserve updated_at: a cosmetic view-count bump must not mark the
+                # row changed, otherwise the model's onupdate=func.now() fires and
+                # (a) makes vector-sync re-pull this property every day and
+                # (b) dirties updated_at on the cached detail payload. Setting the
+                # column to itself bypasses the onupdate.
+                updated_at=Property.updated_at,
+            )
         )
 
         result = await db.execute(stmt)

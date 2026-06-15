@@ -102,6 +102,21 @@ class PropertyCacheManager:
         return await cache.delete_pattern("properties:*")
 
     @staticmethod
+    def detail_cache_key(property_id: int) -> str:
+        """Cache key for a single property's detail payload."""
+        return f"property:{property_id}:v1"
+
+    @staticmethod
+    async def invalidate_property_detail_cache(property_id: int) -> int:
+        """Invalidate the cached detail payload for a single property.
+
+        Called on create/update/delete so stale detail responses are not served
+        for the (long) CACHE_TTL_PROPERTY_DETAIL window.
+        """
+        cache = get_cache_manager()
+        return await cache.delete_pattern(f"property:{property_id}:*")
+
+    @staticmethod
     async def get_cached_properties(
         filters: dict, user_id: int, page: int, limit: int
     ) -> dict | None:

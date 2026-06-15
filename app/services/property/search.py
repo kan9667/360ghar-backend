@@ -22,6 +22,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
 from app.core.cache import PropertyCacheManager
 from app.core.db_resilience import execute_with_transient_retry
 from app.core.logging import get_logger
@@ -676,7 +677,12 @@ async def get_unified_properties_optimized(
                     "total_pages": total_pages,
                 }
                 await PropertyCacheManager.cache_properties(
-                    cache_filters, cache_user_id, page, limit, cache_payload, ttl=60
+                    cache_filters,
+                    cache_user_id,
+                    page,
+                    limit,
+                    cache_payload,
+                    ttl=settings.CACHE_TTL_PROPERTIES_LIST,
                 )
             except Exception as cache_exc:  # noqa: BLE001
                 logger.warning("Failed to cache property search: %s", cache_exc)

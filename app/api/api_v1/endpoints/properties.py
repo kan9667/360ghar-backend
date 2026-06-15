@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.api_v1.dependencies.auth import get_current_active_user, get_current_user_optional
@@ -38,6 +38,41 @@ from app.services.visit import get_user_property_visit_stats
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+# User-agent tokens for known crawlers. Detail-page views by these bots should
+# not count toward view totals, and skipping the per-view write keeps the
+# detail GET side-effect free (so it can be cached cleanly at the edge).
+_BOT_USER_AGENT_TOKENS = (
+    "bot",
+    "crawler",
+    "spider",
+    "slurp",
+    "bingpreview",
+    "preview",
+    "facebookexternalhit",
+    "twitterbot",
+    "linkedinbot",
+    "whatsapp",
+    "telegram",
+    "applebot",
+    "yandex",
+    "baidu",
+    "bytespider",
+    "gptbot",
+    "claudebot",
+    "ccbot",
+    "perplexitybot",
+    "google-structured-data",
+    "googlebot",
+)
+
+
+def _is_bot_user_agent(user_agent: str | None) -> bool:
+    """Heuristic: True if the User-Agent looks like a crawler."""
+    if not user_agent:
+        return False
+    lowered = user_agent.lower()
+    return any(token in lowered for token in _BOT_USER_AGENT_TOKENS)
 
 
 def build_property_filters(
@@ -342,6 +377,7 @@ async def get_recommendations(
 @router.get("/{property_id}", response_model=Property)
 async def get_property_details(
     property_id: int,
+    request: Request,
     current_user: UserSchema | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
@@ -359,8 +395,13 @@ async def get_property_details(
         if moderation_status != "live" and not (is_owner or is_admin):
             raise HTTPException(status_code=404, detail="Property not found")
 
-    # Increment view count
-    await increment_property_view_count(db, property_id)
+    # Increment view count (best-effort, skipped for crawlers so the GET stays
+    # read-only and cacheable). A failure here must never break the response.
+    if not _is_bot_user_agent(request.headers.get("user-agent")):
+        try:
+            await increment_property_view_count(db, property_id)
+        except Exception as view_exc:  # noqa: BLE001
+            logger.warning("View count increment failed for %s: %s", property_id, view_exc)
 
     # If user is authenticated, enrich with user-specific context
     if current_user:

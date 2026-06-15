@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import PropertyCacheManager
 from app.core.exceptions import (
     InsufficientPermissionsError,
     PropertyNotFoundException,
@@ -299,6 +300,11 @@ async def update_property_fields(
     await db.refresh(prop)
     await db.commit()
 
+    # These direct ORM writes bypass services/property/crud.update_property, so
+    # invalidate the property caches explicitly (mirrors crud.update_property).
+    await PropertyCacheManager.invalidate_property_caches(property_id)
+    await PropertyCacheManager.invalidate_property_detail_cache(property_id)
+
     return {
         "message": "Property updated successfully",
         "property": serialize_property_basic(prop),
@@ -319,6 +325,11 @@ async def toggle_property_availability(
     prop.is_available = is_available
     await db.flush()
     await db.commit()
+
+    # Availability changes which properties search should return, so invalidate
+    # the property caches (this path bypasses crud.update_property).
+    await PropertyCacheManager.invalidate_property_caches(property_id)
+    await PropertyCacheManager.invalidate_property_detail_cache(property_id)
 
     status = "available" if is_available else "unavailable"
     return {"message": f"Property marked as {status}", "property_id": property_id}
