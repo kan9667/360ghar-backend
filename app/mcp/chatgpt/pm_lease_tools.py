@@ -65,18 +65,18 @@ async def owner_leases_list(
             # Convert status string to LeaseStatus enum for the service layer
             lease_status = LeaseStatus(status) if status else None
 
-            # Get leases for owner's properties
-            leases = await list_leases(
+            # Get leases for owner's properties (cursor-based; page param ignored, always first page)
+            rows, _next_payload, _total = await list_leases(
                 db,
                 actor=user,
                 owner_id=user.id,
                 property_id=property_id,
                 status=lease_status,
+                cursor_payload={},
                 limit=limit,
-                offset=(page - 1) * limit,
             )
 
-            serialized = [_serialize_lease(lease) for lease in leases]
+            serialized = [_serialize_lease(lease) for lease in rows]
 
             # Calculate stats
             active_count = sum(1 for lease_data in serialized if lease_data["status"] == "active")

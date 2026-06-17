@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -12,6 +12,7 @@ from app.models.enums import LeaseStatus, UserRole
 from app.models.pm_leases import Lease
 from app.models.properties import Property
 from app.models.users import User
+from app.schemas.pagination import keyset_payload, read_keyset
 from app.services.pm_authz import (
     assert_can_access_lease,
     assert_can_access_property,
@@ -108,9 +109,10 @@ async def list_leases(
     property_id: int | None = None,
     tenant_user_id: int | None = None,
     status: LeaseStatus | None = None,
-    limit: int = 50,
-    offset: int = 0,
-) -> list[Lease]:
+    cursor_payload: dict,
+    limit: int = 20,
+    with_total: bool = False,
+) -> tuple[list[Lease], dict | None, int | None]:
     # Resolve scope
     if actor.role == UserRole.user.value:
         # Owner list context
@@ -134,9 +136,25 @@ async def list_leases(
     if status is not None:
         stmt = stmt.where(Lease.status == status)
 
-    stmt = stmt.order_by(Lease.created_at.desc()).offset(offset).limit(limit)
-    res = await db.execute(stmt)
-    return list(res.scalars().all())
+    count_total = None
+    if with_total:
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        count_total = (await db.execute(count_stmt)).scalar_one()
+
+    keyset = read_keyset(cursor_payload)
+    if keyset is not None:
+        last_sort, last_id = keyset
+        stmt = stmt.where(tuple_(Lease.created_at, Lease.id) < (last_sort, last_id))
+
+    stmt = stmt.order_by(Lease.created_at.desc(), Lease.id.desc()).limit(limit + 1)
+    rows = list((await db.execute(stmt)).scalars().all())
+
+    next_payload = None
+    if len(rows) > limit:
+        rows = rows[:limit]
+        last = rows[-1]
+        next_payload = keyset_payload(last.created_at.isoformat(), last.id)
+    return rows, next_payload, count_total
 
 
 async def get_lease(db: AsyncSession, *, actor: User, lease_id: int) -> Lease:
