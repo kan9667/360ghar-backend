@@ -143,18 +143,21 @@ class TestPMTenantEndpoints:
 
     @pytest.mark.asyncio
     async def test_list_tenants(self, authenticated_client: AsyncClient):
-        """Test listing tenants."""
+        """Test listing tenants returns cursor-paginated envelope."""
         with patch(
             "app.services.pm_tenants.list_tenants",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = []
+            mock_list.return_value = ([], None, None)
 
             response = await authenticated_client.get(
                 "/api/v1/pm/tenants/"
             )
 
             assert response.status_code == 200
+            body = response.json()
+            assert "items" in body
+            assert "has_more" in body
 
     @pytest.mark.asyncio
     async def test_list_tenants_unauthorized(self, client: AsyncClient):

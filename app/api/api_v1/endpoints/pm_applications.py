@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.api_v1.dependencies.auth import get_current_active_user
 from app.core.database import get_db
 from app.models.enums import TenantStatus, UserRole
+from app.schemas.pagination import CursorPage, CursorParams, build_cursor_page
 from app.schemas.pm_application import (
     PublicRentalApplicationForm,
     RentalApplication,
@@ -62,26 +63,27 @@ async def create_form(
     return RentalApplicationForm.model_validate(form)
 
 
-@router.get("/forms", response_model=list[RentalApplicationForm])
+@router.get("/forms", response_model=CursorPage[RentalApplicationForm])
 async def list_forms(
     owner_id: int | None = Query(None, description="Owner id (agent/admin only)"),
     property_id: int | None = Query(None),
     q: str | None = Query(None, description="Search by title"),
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    page: CursorParams = Depends(),
     current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    forms = await list_application_forms(
+    rows, next_payload, count_total = await list_application_forms(
         db,
         actor=current_user,  # type: ignore[arg-type]
         owner_id=owner_id,
         property_id=property_id,
         q=q,
-        limit=limit,
-        offset=offset,
+        cursor_payload=page.decoded(),
+        limit=page.limit,
+        with_total=page.include_total,
     )
-    return [RentalApplicationForm.model_validate(f) for f in forms]
+    items = [RentalApplicationForm.model_validate(f) for f in rows]
+    return build_cursor_page(items, limit=page.limit, next_payload=next_payload, total=count_total)
 
 
 @router.get("/forms/{form_id}", response_model=RentalApplicationForm)
@@ -94,19 +96,18 @@ async def get_form(
     return RentalApplicationForm.model_validate(form)
 
 
-@router.get("", response_model=list[RentalApplication])
+@router.get("", response_model=CursorPage[RentalApplication])
 async def list_inbox(
     owner_id: int | None = Query(None, description="Owner id (agent/admin only)"),
     property_id: int | None = Query(None),
     status: TenantStatus | None = Query(None),
     submitted_from: datetime | None = Query(None),
     submitted_to: datetime | None = Query(None),
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    page: CursorParams = Depends(),
     current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    apps = await list_applications(
+    rows, next_payload, count_total = await list_applications(
         db,
         actor=current_user,  # type: ignore[arg-type]
         owner_id=owner_id,
@@ -114,10 +115,12 @@ async def list_inbox(
         status=status,
         submitted_from=submitted_from,
         submitted_to=submitted_to,
-        limit=limit,
-        offset=offset,
+        cursor_payload=page.decoded(),
+        limit=page.limit,
+        with_total=page.include_total,
     )
-    return [RentalApplication.model_validate(a) for a in apps]
+    items = [RentalApplication.model_validate(a) for a in rows]
+    return build_cursor_page(items, limit=page.limit, next_payload=next_payload, total=count_total)
 
 
 @router.get("/{application_id}", response_model=RentalApplication)
