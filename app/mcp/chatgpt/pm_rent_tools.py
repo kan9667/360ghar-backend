@@ -47,7 +47,6 @@ RENT_COLLECTION_META = build_widget_tool_meta(
 async def owner_rent_status(
     property_id: int | None = None,
     include_paid: bool = False,
-    page: int = 1,
     limit: int = 20,
 ) -> dict[str, Any]:
     """View rent charges and collection totals for the authenticated owner."""
@@ -56,7 +55,6 @@ async def owner_rent_status(
         from app.services.pm_rent import list_rent_charges
 
         limit = min(max(1, limit), 50)
-        page = max(1, page)
 
         async with AsyncSessionLocal() as db:
             user = await _get_optional_user(db)
@@ -93,14 +91,14 @@ async def owner_rent_status(
                         limit=limit,
                     )
                     all_charges.extend(batch)
-                # Sort by due_date ascending (matching service default) and paginate
+                # Sort by due_date ascending (matching service default)
                 def _sort_key(c: Any) -> Any:
                     charge_obj = c.get("charge") if isinstance(c, dict) and "charge" in c else c
                     return getattr(charge_obj, "due_date", None) or ""
 
                 all_charges.sort(key=_sort_key)
-                offset = (page - 1) * limit
-                charges = all_charges[offset : offset + limit]
+                # MCP first-page-only: each status batch returns first page only; no deep pagination.
+                charges = all_charges[:limit]
 
             serialized = [_serialize_rent_charge(c) for c in charges]
 
@@ -120,7 +118,6 @@ async def owner_rent_status(
                 data={
                     "charges": serialized,
                     "totals": totals,
-                    "page": page,
                     "limit": limit,
                 },
                 content_summary=_format_rent_summary(serialized, totals),
