@@ -1,4 +1,4 @@
-"""Cursor-pagination integration tests for swipes and pm/dashboard/activity endpoints.
+"""Cursor-pagination integration tests for tours, upload/media, swipes and pm/dashboard/activity.
 
 Each endpoint gets:
   - a page-walk test (limit=2, 3 seeded rows, has_more True, no overlap)
@@ -15,9 +15,10 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from app.models.enums import LeaseStatus, PropertyPurpose, PropertyType, UserRole
+from app.models.enums import LeaseStatus, PropertyPurpose, PropertyType, TourStatus, UserRole
 from app.models.pm_leases import Lease
 from app.models.properties import Property
+from app.models.tours import MediaFile, Tour
 from app.models.users import User, UserSwipe
 
 pytestmark = pytest.mark.asyncio
@@ -193,6 +194,201 @@ async def seeded_pm_leases(db_session, pm_owner) -> list[Lease]:
         leases.append(lease)
 
     return leases
+
+
+# ---------------------------------------------------------------------------
+# Fixtures for tours and upload/media
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def tour_owner(db_session) -> User:
+    """A user who owns tours."""
+    user = User(
+        supabase_user_id=str(uuid.uuid4()),
+        email="tour_cursor_owner@example.com",
+        phone="+919200000003",
+        full_name="Tour Cursor Owner",
+        role=UserRole.user.value,
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    await db_session.refresh(user)
+    return user
+
+
+@pytest_asyncio.fixture
+async def tour_client(test_app, tour_owner) -> AsyncClient:
+    """Authenticated client wired to tour_owner."""
+    from app.api.api_v1.dependencies.auth import (
+        get_current_active_user,
+        get_current_user,
+        get_current_user_optional,
+    )
+    from app.schemas.user import User as UserSchema
+
+    user_schema = UserSchema.model_validate(tour_owner, from_attributes=True)
+
+    async def override_get_current_user() -> UserSchema:
+        return user_schema
+
+    async def override_get_current_active_user() -> UserSchema:
+        return user_schema
+
+    async def override_get_current_user_optional() -> UserSchema:
+        return user_schema
+
+    test_app.dependency_overrides[get_current_user] = override_get_current_user
+    test_app.dependency_overrides[get_current_active_user] = override_get_current_active_user
+    test_app.dependency_overrides[get_current_user_optional] = override_get_current_user_optional
+
+    transport = ASGITransport(app=test_app)
+    async with AsyncClient(transport=transport, base_url="http://test", timeout=60.0) as ac:
+        yield ac
+
+    test_app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def seeded_tours(db_session, tour_owner) -> list[Tour]:
+    """Create 3 draft tours for tour_owner."""
+    tours = []
+    for i in range(3):
+        tour = Tour(
+            id=str(uuid.uuid4()),
+            user_id=tour_owner.id,
+            title=f"Cursor Tour {i}",
+            status=TourStatus.draft,
+            is_public=False,
+        )
+        db_session.add(tour)
+        await db_session.flush()
+        await db_session.refresh(tour)
+        tours.append(tour)
+    return tours
+
+
+@pytest_asyncio.fixture
+async def seeded_media(db_session, tour_owner) -> list[MediaFile]:
+    """Create 3 media files for tour_owner."""
+    files = []
+    for i in range(3):
+        mf = MediaFile(
+            user_id=tour_owner.id,
+            filename=f"cursor_file_{i}.jpg",
+            file_url=f"https://example.com/cursor_file_{i}.jpg",
+            file_size=1024 * (i + 1),
+            mime_type="image/jpeg",
+            folder="uploads",
+            visibility="private",
+            upload_status="complete",
+        )
+        db_session.add(mf)
+        await db_session.flush()
+        await db_session.refresh(mf)
+        files.append(mf)
+    return files
+
+
+# ---------------------------------------------------------------------------
+# Tours endpoint tests
+# ---------------------------------------------------------------------------
+
+
+async def test_tours_cursor_paginates(
+    tour_client: AsyncClient,
+    seeded_tours: list[Tour],
+) -> None:
+    """Page-walk: limit=2, 3 rows → page1 has_more=True, no ID overlap."""
+    r1 = await tour_client.get("/api/v1/tours?limit=2")
+    assert r1.status_code == 200, r1.text
+    body1 = r1.json()
+    assert set(body1) >= {"items", "next_cursor", "has_more", "limit"}
+    assert len(body1["items"]) == 2
+    assert body1["has_more"] is True
+    assert body1["next_cursor"]
+
+    r2 = await tour_client.get(f"/api/v1/tours?limit=2&cursor={body1['next_cursor']}")
+    assert r2.status_code == 200, r2.text
+    body2 = r2.json()
+    ids1 = {item["id"] for item in body1["items"]}
+    ids2 = {item["id"] for item in body2["items"]}
+    assert ids1.isdisjoint(ids2), "ID overlap across pages"
+    # Walk to terminal
+    if body2.get("next_cursor"):
+        r3 = await tour_client.get(f"/api/v1/tours?limit=2&cursor={body2['next_cursor']}")
+        assert r3.status_code == 200, r3.text
+        assert r3.json()["has_more"] is False
+
+
+async def test_tours_include_total(
+    tour_client: AsyncClient,
+    seeded_tours: list[Tour],
+) -> None:
+    """include_total=true returns total >= 3."""
+    r = await tour_client.get("/api/v1/tours?limit=2&include_total=true")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "total" in body
+    assert body["total"] >= 3
+
+
+async def test_tours_invalid_cursor_400(tour_client: AsyncClient) -> None:
+    """Garbage cursor → 400 with INVALID_CURSOR error code."""
+    r = await tour_client.get("/api/v1/tours?cursor=garbage!!!")
+    assert r.status_code == 400, r.text
+    assert r.json()["error"]["code"] == "INVALID_CURSOR"
+
+
+# ---------------------------------------------------------------------------
+# Upload/media endpoint tests
+# ---------------------------------------------------------------------------
+
+
+async def test_media_cursor_paginates(
+    tour_client: AsyncClient,
+    seeded_media: list[MediaFile],
+) -> None:
+    """Page-walk: limit=2, 3 rows → page1 has_more=True, no ID overlap."""
+    r1 = await tour_client.get("/api/v1/upload/media?limit=2")
+    assert r1.status_code == 200, r1.text
+    body1 = r1.json()
+    assert set(body1) >= {"items", "next_cursor", "has_more", "limit"}
+    assert len(body1["items"]) == 2
+    assert body1["has_more"] is True
+    assert body1["next_cursor"]
+
+    r2 = await tour_client.get(f"/api/v1/upload/media?limit=2&cursor={body1['next_cursor']}")
+    assert r2.status_code == 200, r2.text
+    body2 = r2.json()
+    ids1 = {item["id"] for item in body1["items"]}
+    ids2 = {item["id"] for item in body2["items"]}
+    assert ids1.isdisjoint(ids2), "ID overlap across pages"
+    if body2.get("next_cursor"):
+        r3 = await tour_client.get(f"/api/v1/upload/media?limit=2&cursor={body2['next_cursor']}")
+        assert r3.status_code == 200, r3.text
+        assert r3.json()["has_more"] is False
+
+
+async def test_media_include_total(
+    tour_client: AsyncClient,
+    seeded_media: list[MediaFile],
+) -> None:
+    """include_total=true returns total >= 3."""
+    r = await tour_client.get("/api/v1/upload/media?limit=2&include_total=true")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "total" in body
+    assert body["total"] >= 3
+
+
+async def test_media_invalid_cursor_400(tour_client: AsyncClient) -> None:
+    """Garbage cursor → 400 with INVALID_CURSOR error code."""
+    r = await tour_client.get("/api/v1/upload/media?cursor=garbage!!!")
+    assert r.status_code == 400, r.text
+    assert r.json()["error"]["code"] == "INVALID_CURSOR"
 
 
 # ---------------------------------------------------------------------------
