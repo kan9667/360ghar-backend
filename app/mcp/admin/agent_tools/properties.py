@@ -82,14 +82,14 @@ async def agent_properties_list(
             user_schema = UserSchema.model_validate(user)
 
             try:
-                properties = await list_managed_properties(
+                rows, _next, _total = await list_managed_properties(
                     db,
                     actor=user_schema,
                     owner_id=owner_id,
                     occupancy=occupancy,
                     q=q,
+                    cursor_payload={},
                     limit=limit,
-                    offset=(page - 1) * limit,
                 )
             except InsufficientPermissionsError as e:
                 return MCPResponse.failure(
@@ -97,7 +97,7 @@ async def agent_properties_list(
                     str(e)
                 ).model_dump()
 
-            items = [serialize_property_basic(p) for p in properties]
+            items = [serialize_property_basic(p) for p in rows]
 
             return MCPResponse.success({
                 "total": len(items),

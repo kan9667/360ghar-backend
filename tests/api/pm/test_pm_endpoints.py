@@ -122,7 +122,7 @@ class TestPMMaintenanceEndpoints:
             "app.services.pm_maintenance.list_maintenance_requests",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = []
+            mock_list.return_value = ([], None, None)
 
             response = await authenticated_client.get(
                 "/api/v1/pm/maintenance/requests"
@@ -172,7 +172,7 @@ class TestPMExpenseEndpoints:
             "app.services.pm_expenses.list_expenses",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = []
+            mock_list.return_value = ([], None, None)
 
             response = await authenticated_client.get(
                 "/api/v1/pm/expenses/"

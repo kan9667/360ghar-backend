@@ -555,7 +555,7 @@ class TestMCPEndToEnd:
 
             # list_managed_properties is in app.services.pm_properties
             with patch("app.services.pm_properties.list_managed_properties", new_callable=AsyncMock) as mock_list:
-                mock_list.return_value = []
+                mock_list.return_value = ([], None, None)
 
                 with patch("app.mcp.admin.agent.get_db") as mock_db:
                     mock_db.return_value = AsyncIteratorMock([MagicMock()])
@@ -614,7 +614,7 @@ class TestMCPEndToEnd:
                 mock_db_gen.return_value = AsyncIteratorMock([mock_db])
 
                 with patch("app.services.pm_properties.list_managed_properties", new_callable=AsyncMock) as mock_props:
-                    mock_props.return_value = []
+                    mock_props.return_value = ([], None, None)
 
                     result = await list_fn()
                     # owner tools return dict via MCPResponse

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.api_v1.dependencies.auth import get_current_active_user
 from app.core.database import get_db
 from app.models.enums import ExpenseCategory, UserRole
+from app.schemas.pagination import CursorPage, CursorParams, build_cursor_page
 from app.schemas.pm_expense import Expense as ExpenseSchema
 from app.schemas.pm_expense import ExpenseCreate, ExpenseUpdate
 from app.schemas.user import User as UserSchema
@@ -49,19 +50,18 @@ async def create_pm_expense(
     return ExpenseSchema.model_validate(expense)
 
 
-@router.get("", response_model=list[ExpenseSchema])
+@router.get("", response_model=CursorPage[ExpenseSchema])
 async def list_pm_expenses(
     owner_id: int | None = Query(None, description="Owner id (agent/admin only)"),
     property_id: int | None = Query(None),
     category: ExpenseCategory | None = Query(None),
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    page: CursorParams = Depends(),
     current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    expenses = await list_expenses(
+    rows, next_payload, total = await list_expenses(
         db,
         actor=current_user,  # type: ignore[arg-type]
         owner_id=owner_id,
@@ -69,10 +69,16 @@ async def list_pm_expenses(
         category=category,
         start_date=start_date,
         end_date=end_date,
-        limit=limit,
-        offset=offset,
+        cursor_payload=page.decoded(),
+        limit=page.limit,
+        with_total=page.include_total,
     )
-    return [ExpenseSchema.model_validate(e) for e in expenses]
+    return build_cursor_page(
+        [ExpenseSchema.model_validate(e) for e in rows],
+        limit=page.limit,
+        next_payload=next_payload,
+        total=total,
+    )
 
 
 @router.patch("/{expense_id}", response_model=ExpenseSchema)

@@ -46,9 +46,9 @@ async def owner_properties_list(
     db, user = ctx.deps.db, ctx.deps.user
     actor = _user_schema(user)
 
-    properties = await list_managed_properties(
+    properties, _next, _total = await list_managed_properties(
         db, actor=actor, owner_id=user.id, occupancy=occupancy, q=q,
-        limit=limit, offset=(page - 1) * limit,
+        cursor_payload={}, limit=limit,
     )
 
     property_ids = [p.id for p in properties]
@@ -249,9 +249,9 @@ async def agent_properties_list(
     db, user = ctx.deps.db, ctx.deps.user
     limit = min(max(1, limit), 100)
     actor = _user_schema(user)
-    properties = await list_managed_properties(
+    properties, _next, _total = await list_managed_properties(
         db, actor=actor, owner_id=owner_id, occupancy=occupancy, q=q,
-        limit=limit, offset=(page - 1) * limit,
+        cursor_payload={}, limit=limit,
     )
     items = [serialize_property_basic(p) for p in properties]
     return {"items": items, "total": len(items), "page": page}

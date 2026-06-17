@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.api_v1.dependencies.auth import get_current_active_user
 from app.core.database import get_db
 from app.models.enums import ManagedPropertyStatus, UserRole
+from app.schemas.pagination import CursorPage, CursorParams, build_cursor_page
 from app.schemas.pm_property import ManagedPropertyDetail, ManagedPropertyUpdate
 from app.schemas.property import Property as PropertySchema
 from app.schemas.property import PropertyCreate
@@ -51,26 +52,31 @@ async def create_pm_property(
     return PropertySchema.model_validate(prop)
 
 
-@router.get("", response_model=list[PropertySchema])
+@router.get("", response_model=CursorPage[PropertySchema])
 async def list_pm_properties(
     owner_id: int | None = Query(None, description="Owner id (agent/admin only)"),
     occupancy: str | None = Query(None, description="occupied|vacant"),
     q: str | None = Query(None, description="Search by title/address"),
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    page: CursorParams = Depends(),
     current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    props = await list_managed_properties(
+    rows, next_payload, total = await list_managed_properties(
         db,
         actor=current_user,
         owner_id=owner_id,
         occupancy=occupancy,
         q=q,
-        limit=limit,
-        offset=offset,
+        cursor_payload=page.decoded(),
+        limit=page.limit,
+        with_total=page.include_total,
     )
-    return [PropertySchema.model_validate(p) for p in props]
+    return build_cursor_page(
+        [PropertySchema.model_validate(p) for p in rows],
+        limit=page.limit,
+        next_payload=next_payload,
+        total=total,
+    )
 
 
 @router.get("/{property_id}", response_model=ManagedPropertyDetail)

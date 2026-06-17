@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.api_v1.dependencies.auth import get_current_active_user
 from app.core.database import get_db
 from app.models.enums import UserRole
+from app.schemas.pagination import CursorPage, CursorParams, build_cursor_page
 from app.schemas.pm_inspection import (
     InspectionChecklist as InspectionChecklistSchema,
 )
@@ -52,26 +53,31 @@ async def create_inspection(
     return InspectionChecklistSchema.model_validate(checklist)
 
 
-@router.get("", response_model=list[InspectionChecklistSchema])
+@router.get("", response_model=CursorPage[InspectionChecklistSchema])
 async def list_inspection_checklists(
     owner_id: int | None = Query(None, description="Owner id (agent/admin only)"),
     lease_id: int | None = Query(None),
     property_id: int | None = Query(None),
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    page: CursorParams = Depends(),
     current_user: UserSchema = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await list_inspections(
+    rows, next_payload, total = await list_inspections(
         db,
         actor=current_user,  # type: ignore[arg-type]
         owner_id=owner_id,
         lease_id=lease_id,
         property_id=property_id,
-        limit=limit,
-        offset=offset,
+        cursor_payload=page.decoded(),
+        limit=page.limit,
+        with_total=page.include_total,
     )
-    return [InspectionChecklistSchema.model_validate(r) for r in rows]
+    return build_cursor_page(
+        [InspectionChecklistSchema.model_validate(r) for r in rows],
+        limit=page.limit,
+        next_payload=next_payload,
+        total=total,
+    )
 
 
 @router.get("/{inspection_id}", response_model=InspectionChecklistSchema)

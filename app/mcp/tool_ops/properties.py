@@ -110,17 +110,17 @@ async def list_properties_enriched(
     limit = min(max(1, limit), 100)
     actor_schema = _user_schema(actor)
 
-    properties = await list_managed_properties(
+    rows, _next, _total = await list_managed_properties(
         db,
         actor=actor_schema,
         owner_id=owner_id,
         occupancy=occupancy,
         q=q,
+        cursor_payload={},
         limit=limit,
-        offset=(page - 1) * limit,
     )
 
-    items, stats = await enrich_properties_with_lease_info(db, properties)
+    items, stats = await enrich_properties_with_lease_info(db, rows)
 
     return {
         "items": items,
