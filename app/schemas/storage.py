@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -48,14 +50,6 @@ class MediaFileResponse(BaseModel):
     storage_path: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class MediaListResponse(BaseModel):
-    items: list[MediaFileResponse]
-    total: int
-    page: int
-    page_size: int
-    total_pages: int
 
 
 class MediaUpdateRequest(BaseModel):

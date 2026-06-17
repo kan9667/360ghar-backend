@@ -4,6 +4,8 @@
 This module provides REST API endpoints for managing virtual tours,
 including CRUD operations, publishing, duplication, and analytics.
 """
+from __future__ import annotations
+
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -13,8 +15,8 @@ from app.api.api_v1.dependencies.auth import get_current_active_user
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.models.enums import TourStatus
+from app.schemas.pagination import CursorPage, CursorParams, build_cursor_page
 from app.schemas.tour import (
-    PaginatedTourResponse,
     Scene,
     SceneCreate,
     SceneReorder,
@@ -33,12 +35,10 @@ logger = get_logger(__name__)
 
 @router.get(
     "",
-    response_model=PaginatedTourResponse,
-    response_model_exclude={"items": {"__all__": {"scenes"}}},
+    response_model=CursorPage[Tour],
 )
 async def list_tours(
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    page: CursorParams = Depends(),
     status: TourStatus | None = Query(None, description="Filter by status"),
     search: str | None = Query(None, description="Search in title/description"),
     db: AsyncSession = Depends(get_db),
@@ -49,15 +49,21 @@ async def list_tours(
 
     Returns paginated list of tours with optional filtering by status and search.
     """
-    result = await tour_service.get_tours(
+    tours, next_payload, total = await tour_service.get_tours(
         db=db,
         user_id=current_user.id,
-        page=page,
-        page_size=page_size,
+        cursor_payload=page.decoded(),
+        limit=page.limit,
+        with_total=page.include_total,
         status_filter=status,
         search=search,
     )
-    return result
+    return build_cursor_page(
+        [Tour.model_validate(t) for t in tours],
+        limit=page.limit,
+        next_payload=next_payload,
+        total=total,
+    )
 
 
 @router.post("", response_model=Tour, status_code=status.HTTP_201_CREATED)

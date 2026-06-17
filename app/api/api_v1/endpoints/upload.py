@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
@@ -7,9 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.api_v1.dependencies.auth import get_current_active_user
 from app.core.database import get_db
 from app.models.tours import MediaFile
+from app.schemas.pagination import (
+    CursorPage,
+    CursorParams,
+    build_cursor_page,
+    keyset_filter,
+    keyset_payload,
+    keyset_sort_value,
+)
 from app.schemas.storage import (
     MediaFileResponse,
-    MediaListResponse,
     MediaUpdateRequest,
     PresignedUploadRequest,
     PresignedUploadResponse,
@@ -165,10 +174,9 @@ async def confirm_upload(
     }
 
 
-@router.get("/media", response_model=MediaListResponse)
+@router.get("/media", response_model=CursorPage[MediaFileResponse])
 async def list_media(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page: CursorParams = Depends(),
     tour_id: str | None = Query(None),
     folder: str | None = Query(None),
     mime_type: str | None = Query(None),
@@ -179,36 +187,44 @@ async def list_media(
     db: AsyncSession = Depends(get_db),
 ):
     """List uploaded media files for the current user."""
-    query = select(MediaFile).where(MediaFile.user_id == current_user.id)
+    cursor_payload = page.decoded()
+
+    stmt = select(MediaFile).where(MediaFile.user_id == current_user.id)
     if tour_id:
-        query = query.where(MediaFile.tour_id == tour_id)
+        stmt = stmt.where(MediaFile.tour_id == tour_id)
     if folder:
-        query = query.where(MediaFile.folder == folder)
+        stmt = stmt.where(MediaFile.folder == folder)
     if mime_type:
-        query = query.where(MediaFile.mime_type == mime_type)
+        stmt = stmt.where(MediaFile.mime_type == mime_type)
     if visibility:
-        query = query.where(MediaFile.visibility == visibility)
+        stmt = stmt.where(MediaFile.visibility == visibility)
     if is_processed is not None:
-        query = query.where(MediaFile.is_processed == is_processed)
+        stmt = stmt.where(MediaFile.is_processed == is_processed)
     if upload_status:
-        query = query.where(MediaFile.upload_status == upload_status)
+        stmt = stmt.where(MediaFile.upload_status == upload_status)
 
-    count_query = select(func.count()).select_from(query.subquery())
-    total_result = await db.execute(count_query)
-    total = total_result.scalar() or 0
-    total_pages = (total + page_size - 1) // page_size
+    count_total = None
+    if page.include_total:
+        count_total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
 
-    query = query.order_by(MediaFile.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
-    items = list(result.scalars().all())
+    predicate = keyset_filter(MediaFile.created_at, MediaFile.id, cursor_payload, descending=True)
+    if predicate is not None:
+        stmt = stmt.where(predicate)
 
-    return {
-        "items": [MediaFileResponse.model_validate(item) for item in items],
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": total_pages,
-    }
+    stmt = stmt.order_by(MediaFile.created_at.desc(), MediaFile.id.desc()).limit(page.limit + 1)
+    items = list((await db.execute(stmt)).scalars().all())
+
+    next_payload = None
+    if len(items) > page.limit:
+        items = items[:page.limit]
+        next_payload = keyset_payload(keyset_sort_value(items[-1].created_at), items[-1].id)
+
+    return build_cursor_page(
+        [MediaFileResponse.model_validate(item) for item in items],
+        limit=page.limit,
+        next_payload=next_payload,
+        total=count_total,
+    )
 
 
 @router.get("/media/{media_id}", response_model=MediaFileResponse)

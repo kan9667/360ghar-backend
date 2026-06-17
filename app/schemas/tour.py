@@ -3,6 +3,8 @@ Pydantic schemas for 360 Virtual Tour API.
 
 These schemas define the request/response models for the tour management endpoints.
 """
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any
 
@@ -368,19 +370,6 @@ class DashboardRealtimeStats(BaseModel):
     shares_last_hour: int = 0
     avg_session_duration: float = 0.0
     recent_views: list[DailyView] = []
-
-
-# ====================
-# Paginated Response
-# ====================
-
-class PaginatedTourResponse(BaseModel):
-    """Paginated response for tours."""
-    items: list[Tour]
-    total: int
-    page: int
-    page_size: int
-    total_pages: int
 
 
 # ====================
