@@ -497,3 +497,70 @@ async def test_pm_activity_invalid_cursor_400(pm_client: AsyncClient) -> None:
     r = await pm_client.get("/api/v1/pm/dashboard/activity?cursor=garbage!!!")
     assert r.status_code == 400, r.text
     assert r.json()["error"]["code"] == "INVALID_CURSOR"
+
+
+async def test_pm_activity_include_total_not_capped(
+    pm_client: AsyncClient,
+    db_session,
+    pm_owner: User,
+) -> None:
+    """include_total must reflect the true per-source SQL count, not the
+    fetch_limit cap (offset + limit + 1).  With limit=2 the old code would
+    cap at fetch_limit = 0+2+1 = 3 rows per source; adding 4 leases means the
+    merged count from lease source alone exceeds that cap.  The real total
+    should be >= 4 leases (no payments or maintenance requests seeded here).
+    """
+    today = date.today()
+    for i in range(4):
+        prop = Property(
+            title=f"PM Total Cap Property {i}",
+            property_type=PropertyType.apartment,
+            purpose=PropertyPurpose.rent,
+            base_price=30000,
+            owner_id=pm_owner.id,
+            is_managed=True,
+        )
+        db_session.add(prop)
+        await db_session.flush()
+
+        lease = Lease(
+            property_id=prop.id,
+            owner_id=pm_owner.id,
+            tenant_name=f"Cap Tenant {i}",
+            tenant_phone=f"+9130000000{i}",
+            status=LeaseStatus.active,
+            start_date=today - timedelta(days=10 + i),
+            end_date=today + timedelta(days=350 - i),
+            monthly_rent=21000.0 + i * 500,
+            security_deposit=42000.0,
+            grace_period_days=5,
+            payment_due_day=1,
+        )
+        db_session.add(lease)
+        await db_session.flush()
+
+    r = await pm_client.get("/api/v1/pm/dashboard/activity?limit=2&include_total=true")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "total" in body
+    # With 4 leases and limit=2, the old cap would have returned 3 (fetch_limit).
+    # The correct per-source count must return >= 4.
+    assert body["total"] >= 4, (
+        f"total={body['total']} appears capped at fetch_limit instead of returning real count"
+    )
+
+
+async def test_tours_list_no_scenes_field(
+    tour_client: AsyncClient,
+    seeded_tours: list[Tour],
+) -> None:
+    """GET /tours list items must NOT include a 'scenes' key (old contract)."""
+    r = await tour_client.get("/api/v1/tours?limit=3")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "items" in body
+    assert len(body["items"]) > 0
+    for item in body["items"]:
+        assert "scenes" not in item, (
+            f"Tour list item should not expose 'scenes' but got keys: {list(item.keys())}"
+        )

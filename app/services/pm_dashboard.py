@@ -213,8 +213,27 @@ async def get_recent_activity(
 
     activities.sort(key=lambda x: x.get("at") or "", reverse=True)
 
-    # Compute total before slicing if requested
-    count_total: int | None = len(activities) if with_total else None
+    # Compute total via per-source SQL COUNT queries so the sum is not capped
+    # by fetch_limit.  Each count mirrors the exact WHERE filters used above.
+    if with_total:
+        pay_count_stmt = select(func.count(RentPayment.id))
+        if owner_ids is not None:
+            pay_count_stmt = pay_count_stmt.where(RentPayment.owner_id.in_(owner_ids))
+        pay_count = int((await db.execute(pay_count_stmt)).scalar_one() or 0)
+
+        maint_count_stmt = select(func.count(MaintenanceRequest.id))
+        if owner_ids is not None:
+            maint_count_stmt = maint_count_stmt.where(MaintenanceRequest.owner_id.in_(owner_ids))
+        maint_count = int((await db.execute(maint_count_stmt)).scalar_one() or 0)
+
+        lease_count_stmt = select(func.count(Lease.id))
+        if owner_ids is not None:
+            lease_count_stmt = lease_count_stmt.where(Lease.owner_id.in_(owner_ids))
+        lease_count = int((await db.execute(lease_count_stmt)).scalar_one() or 0)
+
+        count_total: int | None = pay_count + maint_count + lease_count
+    else:
+        count_total = None
 
     # Apply cursor-based offset pagination with +1 lookahead
     sliced = activities[offset : offset + limit + 1]

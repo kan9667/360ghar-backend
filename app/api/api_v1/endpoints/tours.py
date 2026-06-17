@@ -36,6 +36,7 @@ logger = get_logger(__name__)
 @router.get(
     "",
     response_model=CursorPage[Tour],
+    response_model_exclude={"items": {"__all__": {"scenes"}}},
 )
 async def list_tours(
     page: CursorParams = Depends(),
