@@ -2,6 +2,8 @@
 End-to-end tests for booking complete flow.
 """
 
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
@@ -98,12 +100,11 @@ class TestBookingCompleteFlow:
             "app.api.api_v1.endpoints.properties.get_unified_properties_optimized",
             new_callable=AsyncMock,
         ) as mock_search:
-            mock_search.return_value = {
-                "items": [create_mock_property_dict(test_short_stay_property.id)],
-                "total": 1,
-                "page": 1,
-                "limit": 20,
-            }
+            mock_search.return_value = (
+                [create_mock_property_dict(test_short_stay_property.id)],
+                None,
+                1,
+            )
 
             response = await authenticated_client.get(
                 "/api/v1/properties/",
@@ -199,7 +200,7 @@ class TestBookingManagementFlow:
         self, authenticated_client: AsyncClient, test_user, test_booking
     ):
         """Test viewing and cancelling a booking."""
-        from unittest.mock import MagicMock, NonCallableMock
+        from unittest.mock import NonCallableMock
 
         # Step 1: View booking details - mock at the endpoint level
         # Use NonCallableMock with spec=[] to avoid auto-generated attributes

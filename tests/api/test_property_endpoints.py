@@ -151,16 +151,15 @@ class TestListProperties:
             "app.api.api_v1.endpoints.properties.get_unified_properties_optimized",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = {
-                "items": [],
-                "total": 0,
-                "total_pages": 0,
-            }
+            mock_list.return_value = ([], None, 0)
 
             response = await client.get("/api/v1/properties/")
 
             # Should be accessible without auth
             assert response.status_code == 200
+            data = response.json()
+            assert "items" in data
+            assert "has_more" in data
 
     @pytest.mark.asyncio
     async def test_list_properties_with_filters(self, client: AsyncClient):
@@ -169,11 +168,7 @@ class TestListProperties:
             "app.api.api_v1.endpoints.properties.get_unified_properties_optimized",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = {
-                "items": [],
-                "total": 0,
-                "total_pages": 0,
-            }
+            mock_list.return_value = ([], None, 0)
 
             response = await client.get(
                 "/api/v1/properties/",
@@ -195,11 +190,7 @@ class TestListProperties:
             "app.api.api_v1.endpoints.properties.get_unified_properties_optimized",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = {
-                "items": [],
-                "total": 0,
-                "total_pages": 0,
-            }
+            mock_list.return_value = ([], None, 0)
 
             response = await client.get(
                 "/api/v1/properties/",
@@ -219,7 +210,7 @@ class TestListProperties:
             "app.api.api_v1.endpoints.properties.get_unified_properties_optimized",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = {"items": [], "total": 0, "total_pages": 0}
+            mock_list.return_value = ([], None, 0)
 
             response = await client.get(
                 "/api/v1/properties",
@@ -240,7 +231,7 @@ class TestListProperties:
             "app.api.api_v1.endpoints.properties.get_unified_properties_optimized",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = {"items": [], "total": 0, "total_pages": 0}
+            mock_list.return_value = ([], None, 0)
 
             response = await client.get(
                 "/api/v1/properties",
@@ -422,7 +413,7 @@ class TestPropertyFilters:
             "app.api.api_v1.endpoints.properties.get_unified_properties_optimized",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = {"items": [], "total": 0, "total_pages": 0}
+            mock_list.return_value = ([], None, 0)
 
             response = await client.get(
                 "/api/v1/properties/",
@@ -438,7 +429,7 @@ class TestPropertyFilters:
             "app.api.api_v1.endpoints.properties.get_unified_properties_optimized",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = {"items": [], "total": 0, "total_pages": 0}
+            mock_list.return_value = ([], None, 0)
 
             response = await client.get(
                 "/api/v1/properties/",
@@ -454,7 +445,7 @@ class TestPropertyFilters:
             "app.api.api_v1.endpoints.properties.get_unified_properties_optimized",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = {"items": [], "total": 0, "total_pages": 0}
+            mock_list.return_value = ([], None, 0)
 
             response = await client.get(
                 "/api/v1/properties/",
@@ -491,13 +482,13 @@ class TestMyProperties:
             "app.api.api_v1.endpoints.properties.list_user_properties",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = [create_mock_property(property_id=1)]
+            mock_list.return_value = ([create_mock_property(property_id=1)], None, 1)
 
             response = await authenticated_client.get("/api/v1/properties/me/")
 
             assert response.status_code == 200
             data = response.json()
-            assert len(data) == 1
+            assert len(data["items"]) == 1
 
     @pytest.mark.asyncio
     async def test_my_properties_requires_auth(self, client: AsyncClient):

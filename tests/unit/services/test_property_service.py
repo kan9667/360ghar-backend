@@ -375,9 +375,11 @@ class TestListUserProperties:
         """Test listing properties for a user."""
         from app.services.property import list_user_properties
 
-        result = await list_user_properties(db_session, test_user.id)
+        rows, _next, _total = await list_user_properties(
+            db_session, test_user.id, cursor_payload={}, limit=20
+        )
 
-        assert len(result) == len(test_properties)
+        assert len(rows) == len(test_properties)
 
 
 class TestPropertyFiltering:
@@ -396,12 +398,12 @@ class TestPropertyFiltering:
 
         filters = UnifiedPropertyFilter(city="Mumbai")
 
-        result = await get_unified_properties_optimized(
-            db_session, filters, user_id=test_user.id, page=1, limit=10
+        rows, _next, _total = await get_unified_properties_optimized(
+            db_session, filters, user_id=test_user.id, cursor_payload={}, limit=10
         )
 
-        assert "items" in result
-        for prop in result["items"]:
+        assert isinstance(rows, list)
+        for prop in rows:
             assert prop.city == "Mumbai"
 
     @pytest.mark.asyncio
@@ -417,12 +419,12 @@ class TestPropertyFiltering:
 
         filters = UnifiedPropertyFilter(purpose=PropertyPurpose.rent)
 
-        result = await get_unified_properties_optimized(
-            db_session, filters, user_id=test_user.id, page=1, limit=10
+        rows, _next, _total = await get_unified_properties_optimized(
+            db_session, filters, user_id=test_user.id, cursor_payload={}, limit=10
         )
 
-        assert "items" in result
-        for prop in result["items"]:
+        assert isinstance(rows, list)
+        for prop in rows:
             assert prop.purpose == PropertyPurpose.rent
 
     @pytest.mark.asyncio
@@ -438,12 +440,12 @@ class TestPropertyFiltering:
 
         filters = UnifiedPropertyFilter(property_type=[PropertyType.apartment])
 
-        result = await get_unified_properties_optimized(
-            db_session, filters, user_id=test_user.id, page=1, limit=10
+        rows, _next, _total = await get_unified_properties_optimized(
+            db_session, filters, user_id=test_user.id, cursor_payload={}, limit=10
         )
 
-        assert "items" in result
-        for prop in result["items"]:
+        assert isinstance(rows, list)
+        for prop in rows:
             assert prop.property_type == PropertyType.apartment
 
     @pytest.mark.asyncio
@@ -461,13 +463,13 @@ class TestPropertyFiltering:
             gender_preference=ListingGenderPreference.female,
         )
 
-        result = await get_unified_properties_optimized(
-            db_session, filters, user_id=test_user.id, page=1, limit=10
+        rows, _next, _total = await get_unified_properties_optimized(
+            db_session, filters, user_id=test_user.id, cursor_payload={}, limit=10
         )
 
-        assert "items" in result
-        assert any(prop.property_type == PropertyType.pg for prop in result["items"])
-        for prop in result["items"]:
+        assert isinstance(rows, list)
+        assert any(prop.property_type == PropertyType.pg for prop in rows)
+        for prop in rows:
             assert prop.listing_preferences is not None
             assert prop.listing_preferences.gender_preference == ListingGenderPreference.female
 
@@ -487,16 +489,16 @@ class TestPropertyFiltering:
             sharing_type=ListingSharingType.private_room,
         )
 
-        result = await get_unified_properties_optimized(
-            db_session, filters, user_id=test_user.id, page=1, limit=10
+        rows, _next, _total = await get_unified_properties_optimized(
+            db_session, filters, user_id=test_user.id, cursor_payload={}, limit=10
         )
 
-        assert "items" in result
-        assert len(result["items"]) == 1
-        assert result["items"][0].property_type == PropertyType.flatmate
-        assert result["items"][0].listing_preferences is not None
+        assert isinstance(rows, list)
+        assert len(rows) == 1
+        assert rows[0].property_type == PropertyType.flatmate
+        assert rows[0].listing_preferences is not None
         assert (
-            result["items"][0].listing_preferences.sharing_type
+            rows[0].listing_preferences.sharing_type
             == ListingSharingType.private_room
         )
 
