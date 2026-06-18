@@ -50,8 +50,9 @@ class TestBlogPostEndpoints:
 
     @pytest.mark.asyncio
     async def test_list_blog_posts_returns_503_for_transient_db_error(self, client: AsyncClient):
+        # Public non-admin requests with no include_total go through list_posts_cached.
         with patch(
-            "app.api.api_v1.endpoints.blog.list_blog_posts",
+            "app.api.api_v1.endpoints.blog.list_posts_cached",
             new_callable=AsyncMock,
         ) as mock_list:
             mock_list.side_effect = SQLAlchemyError(

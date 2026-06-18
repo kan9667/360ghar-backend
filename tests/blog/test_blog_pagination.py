@@ -159,3 +159,38 @@ async def test_tags_invalid_cursor_400(blog_client: AsyncClient) -> None:
     r = await blog_client.get("/api/v1/blog/tags?cursor=garbage!!!")
     assert r.status_code == 400, r.text
     assert r.json()["error"]["code"] == "INVALID_CURSOR"
+
+
+async def test_posts_cached_public_path_paginates_correctly(
+    blog_client: AsyncClient, three_posts: list[BlogPost]
+) -> None:
+    """Regression guard for the cached public-path cursor pagination.
+
+    In testing=True mode the cache backend is a NullCache (no-op), so this
+    test exercises the service call path rather than cache hit/miss. It still
+    guarantees: (a) cursor is honoured across pages, (b) page 2 has no ID
+    overlap with page 1, (c) has_more transitions True→False correctly.
+
+    When testing with a live Redis backend, the same assertions confirm that
+    the @cached wrapper keys on cursor_payload+limit and produces distinct
+    pages (i.e. cursor IS included in the cache key).
+    """
+    r1 = await blog_client.get("/api/v1/blog/posts?limit=2")
+    assert r1.status_code == 200, r1.text
+    b1 = r1.json()
+    assert b1["has_more"] is True
+    assert b1["next_cursor"] is not None
+    ids_page1 = {item["id"] for item in b1["items"]}
+
+    r2 = await blog_client.get(f"/api/v1/blog/posts?limit=2&cursor={b1['next_cursor']}")
+    assert r2.status_code == 200, r2.text
+    b2 = r2.json()
+    ids_page2 = {item["id"] for item in b2["items"]}
+
+    # No ID overlap between pages — proves cursor is applied correctly
+    assert ids_page1.isdisjoint(ids_page2), f"Overlapping IDs: {ids_page1 & ids_page2}"
+    # All three posts are accounted for across 2 pages
+    assert len(ids_page1 | ids_page2) == 3
+    # Terminal page reports has_more=False and no next_cursor
+    assert b2["has_more"] is False
+    assert b2["next_cursor"] is None

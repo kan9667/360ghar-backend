@@ -278,6 +278,64 @@ async def get_blog_post_cached(
     return await get_blog_post(db, identifier, include_inactive=False)
 
 
+@cached("blog:posts", ttl=settings.CACHE_TTL_BLOG_POSTS)
+async def list_posts_cached(
+    db: AsyncSession,
+    *,
+    q: str | None,
+    categories: list[str] | None,
+    tags: list[str] | None,
+    cursor_payload: dict,
+    limit: int,
+) -> tuple[list[BlogPostSchema], dict | None, int | None]:
+    """Cached wrapper for public (non-admin) blog post listing.
+
+    Cache key includes all kwargs: q, categories, tags, cursor_payload, limit.
+    with_total is always False for cached results (include_total=True bypasses cache
+    via the uncached service call in the endpoint). Only active posts are cached.
+    """
+    return await list_blog_posts(
+        db,
+        q=q,
+        categories=categories,
+        tags=tags,
+        cursor_payload=cursor_payload,
+        limit=limit,
+        with_total=False,
+        include_inactive=False,
+    )
+
+
+@cached("blog:categories", ttl=settings.CACHE_TTL_BLOG_CATEGORIES)
+async def list_categories_cached(
+    db: AsyncSession,
+    *,
+    cursor_payload: dict,
+    limit: int,
+) -> tuple[list[BlogCategory], dict | None, int | None]:
+    """Cached wrapper for public blog category listing.
+
+    Cache key includes cursor_payload and limit. with_total is always False
+    for cached results (include_total=True bypasses cache in the endpoint).
+    """
+    return await list_categories(db, cursor_payload=cursor_payload, limit=limit, with_total=False)
+
+
+@cached("blog:tags", ttl=settings.CACHE_TTL_BLOG_TAGS)
+async def list_tags_cached(
+    db: AsyncSession,
+    *,
+    cursor_payload: dict,
+    limit: int,
+) -> tuple[list[BlogTag], dict | None, int | None]:
+    """Cached wrapper for public blog tag listing.
+
+    Cache key includes cursor_payload and limit. with_total is always False
+    for cached results (include_total=True bypasses cache in the endpoint).
+    """
+    return await list_tags(db, cursor_payload=cursor_payload, limit=limit, with_total=False)
+
+
 async def list_blog_posts(
     db: AsyncSession,
     q: str | None,

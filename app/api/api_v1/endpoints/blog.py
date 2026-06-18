@@ -39,7 +39,10 @@ from app.services.blog import (
     get_tag,
     list_blog_posts,
     list_categories,
+    list_categories_cached,
+    list_posts_cached,
     list_tags,
+    list_tags_cached,
     update_blog_post,
     update_category,
     update_tag,
@@ -82,16 +85,42 @@ async def list_posts(
         all_tags = (tags or []) + (keywords or [])
         is_admin = bool(current_user and getattr(current_user, "role", None) == UserRole.admin.value)
         cursor_payload = page.decoded()
-        items, next_payload, count_total = await list_blog_posts(
-            db,
-            q=q,
-            categories=categories,
-            tags=all_tags,
-            cursor_payload=cursor_payload,
-            limit=page.limit,
-            with_total=page.include_total,
-            include_inactive=is_admin,
-        )
+
+        if is_admin:
+            # Admin path: uncached, includes inactive posts, supports include_total
+            items, next_payload, count_total = await list_blog_posts(
+                db,
+                q=q,
+                categories=categories,
+                tags=all_tags,
+                cursor_payload=cursor_payload,
+                limit=page.limit,
+                with_total=page.include_total,
+                include_inactive=True,
+            )
+        elif page.include_total:
+            # Public + include_total: bypass cache so count is always fresh
+            items, next_payload, count_total = await list_blog_posts(
+                db,
+                q=q,
+                categories=categories,
+                tags=all_tags,
+                cursor_payload=cursor_payload,
+                limit=page.limit,
+                with_total=True,
+                include_inactive=False,
+            )
+        else:
+            # Public common path: cached, keyed on all kwargs
+            items, next_payload, count_total = await list_posts_cached(
+                db,
+                q=q,
+                categories=categories,
+                tags=all_tags,
+                cursor_payload=cursor_payload,
+                limit=page.limit,
+            )
+
         return build_cursor_page(items, limit=page.limit, next_payload=next_payload, total=count_total)
     except HTTPException:
         raise
@@ -243,12 +272,21 @@ async def list_categories_endpoint(
     """List all blog categories with cursor pagination. Public endpoint."""
     try:
         cursor_payload = page.decoded()
-        categories, next_payload, count_total = await list_categories(
-            db,
-            cursor_payload=cursor_payload,
-            limit=page.limit,
-            with_total=page.include_total,
-        )
+        if page.include_total:
+            # include_total bypasses cache so count is always fresh
+            categories, next_payload, count_total = await list_categories(
+                db,
+                cursor_payload=cursor_payload,
+                limit=page.limit,
+                with_total=True,
+            )
+        else:
+            # Common public path: cached, keyed on cursor_payload + limit
+            categories, next_payload, count_total = await list_categories_cached(
+                db,
+                cursor_payload=cursor_payload,
+                limit=page.limit,
+            )
         return build_cursor_page(categories, limit=page.limit, next_payload=next_payload, total=count_total)
     except HTTPException:
         raise
@@ -333,12 +371,21 @@ async def list_tags_endpoint(
     """List all blog tags with cursor pagination. Public endpoint."""
     try:
         cursor_payload = page.decoded()
-        tags, next_payload, count_total = await list_tags(
-            db,
-            cursor_payload=cursor_payload,
-            limit=page.limit,
-            with_total=page.include_total,
-        )
+        if page.include_total:
+            # include_total bypasses cache so count is always fresh
+            tags, next_payload, count_total = await list_tags(
+                db,
+                cursor_payload=cursor_payload,
+                limit=page.limit,
+                with_total=True,
+            )
+        else:
+            # Common public path: cached, keyed on cursor_payload + limit
+            tags, next_payload, count_total = await list_tags_cached(
+                db,
+                cursor_payload=cursor_payload,
+                limit=page.limit,
+            )
         return build_cursor_page(tags, limit=page.limit, next_payload=next_payload, total=count_total)
     except HTTPException:
         raise
