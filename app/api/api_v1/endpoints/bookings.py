@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,12 +12,12 @@ from app.schemas.booking import (
     BookingAvailability,
     BookingCancel,
     BookingCreate,
-    BookingList,
     BookingPayment,
     BookingReview,
     BookingUpdate,
 )
 from app.schemas.common import MessageResponse
+from app.schemas.pagination import CursorPage, CursorParams, build_cursor_page
 from app.services.booking import (
     add_review,
     calculate_pricing,
@@ -25,6 +27,8 @@ from app.services.booking import (
     get_all_bookings,
     get_booking,
     get_user_bookings,
+    get_user_past_bookings,
+    get_user_upcoming_bookings,
     process_payment,
     update_booking,
 )
@@ -42,28 +46,50 @@ async def create_new_booking(
 ):
     return await create_booking(db, current_user.id, booking)
 
-@router.get("", response_model=BookingList)
+@router.get("", response_model=CursorPage[Booking])
 async def get_my_bookings(
+    page: CursorParams = Depends(),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    return await get_user_bookings(db, current_user.id)
+    rows, next_payload, total = await get_user_bookings(
+        db, current_user.id,
+        cursor_payload=page.decoded(), limit=page.limit, with_total=page.include_total,
+    )
+    return build_cursor_page(
+        [Booking.model_validate(r, from_attributes=True) for r in rows],
+        limit=page.limit, next_payload=next_payload, total=total,
+    )
 
-@router.get("/upcoming")
+@router.get("/upcoming", response_model=CursorPage[Booking])
 async def get_upcoming_bookings(
+    page: CursorParams = Depends(),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    from app.services.booking import get_user_upcoming_bookings
-    return await get_user_upcoming_bookings(db, current_user.id)
+    rows, next_payload, total = await get_user_upcoming_bookings(
+        db, current_user.id,
+        cursor_payload=page.decoded(), limit=page.limit, with_total=page.include_total,
+    )
+    return build_cursor_page(
+        [Booking.model_validate(r, from_attributes=True) for r in rows],
+        limit=page.limit, next_payload=next_payload, total=total,
+    )
 
-@router.get("/past")
+@router.get("/past", response_model=CursorPage[Booking])
 async def get_past_bookings(
+    page: CursorParams = Depends(),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    from app.services.booking import get_user_past_bookings
-    return await get_user_past_bookings(db, current_user.id)
+    rows, next_payload, total = await get_user_past_bookings(
+        db, current_user.id,
+        cursor_payload=page.decoded(), limit=page.limit, with_total=page.include_total,
+    )
+    return build_cursor_page(
+        [Booking.model_validate(r, from_attributes=True) for r in rows],
+        limit=page.limit, next_payload=next_payload, total=total,
+    )
 
 @router.post("/check-availability")
 async def check_booking_availability(
@@ -91,16 +117,15 @@ async def calculate_booking_pricing(
         pricing_request.guests
     )
 
-@router.get("/all", response_model=BookingList)
+@router.get("/all", response_model=CursorPage[Booking])
 async def list_all_bookings(
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    page: CursorParams = Depends(),
     status: str | None = Query(None),
     agent_id: int | None = Query(None, description="Admin only: filter by agent id"),
     property_id: int | None = Query(None),
     user_id: int | None = Query(None),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Global bookings listing. Admins see all; agents see their managed users/properties."""
     effective_agent_id = None
@@ -109,18 +134,23 @@ async def list_all_bookings(
     elif current_user.role == UserRole.agent.value:
         effective_agent_id = current_user.agent_id
         if effective_agent_id is None:
-            return {"bookings": [], "total": 0, "page": page, "limit": limit, "total_pages": 0}
+            return build_cursor_page([], limit=page.limit, next_payload=None, total=0)
     else:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    return await get_all_bookings(
+    rows, next_payload, total = await get_all_bookings(
         db,
-        page=page,
-        limit=limit,
+        cursor_payload=page.decoded(),
+        limit=page.limit,
+        with_total=page.include_total,
         status=status,
         filter_agent_id=effective_agent_id,
         property_id=property_id,
         user_id=user_id,
+    )
+    return build_cursor_page(
+        [Booking.model_validate(r, from_attributes=True) for r in rows],
+        limit=page.limit, next_payload=next_payload, total=total,
     )
 
 @router.get("/{booking_id}", response_model=Booking)

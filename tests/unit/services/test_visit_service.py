@@ -104,14 +104,10 @@ class TestGetUserVisits:
         """Test getting all visits for a user."""
         from app.services.visit import get_user_visits
 
-        result = await get_user_visits(db_session, test_user.id)
+        rows, next_payload, count_total = await get_user_visits(db_session, test_user.id, cursor_payload={}, limit=100)
 
-        assert "visits" in result
-        assert "total" in result
-        assert "upcoming" in result
-        assert "completed" in result
-        assert "cancelled" in result
-        assert result["total"] == len(test_visits)
+        assert isinstance(rows, list)
+        assert len(rows) == len(test_visits)
 
 
 class TestGetUserUpcomingVisits:
@@ -127,10 +123,8 @@ class TestGetUserUpcomingVisits:
         """Test getting upcoming visits."""
         from app.services.visit import get_user_upcoming_visits
 
-        result = await get_user_upcoming_visits(db_session, test_user.id)
-
-        assert "visits" in result
-        assert "total" in result
+        rows, _next, _total = await get_user_upcoming_visits(db_session, test_user.id, cursor_payload={}, limit=100)
+        assert isinstance(rows, list)
 
 
 class TestGetUserPastVisits:
@@ -146,9 +140,8 @@ class TestGetUserPastVisits:
         """Test getting past visits."""
         from app.services.visit import get_user_past_visits
 
-        result = await get_user_past_visits(db_session, test_user.id)
-
-        assert "visits" in result
+        rows, _next, _total = await get_user_past_visits(db_session, test_user.id, cursor_payload={}, limit=100)
+        assert isinstance(rows, list)
 
 
 class TestCancelVisit:
@@ -285,10 +278,9 @@ class TestGetAllVisits:
         """Test getting all visits without filters."""
         from app.services.visit import get_all_visits
 
-        result = await get_all_visits(db_session, page=1, limit=20)
+        rows, _next, _total = await get_all_visits(db_session, cursor_payload={}, limit=20)
 
-        assert "items" in result
-        assert "total" in result
+        assert isinstance(rows, list)
 
     @pytest.mark.asyncio
     async def test_get_all_visits_with_status_filter(
@@ -299,6 +291,6 @@ class TestGetAllVisits:
         """Test getting visits filtered by status."""
         from app.services.visit import get_all_visits
 
-        result = await get_all_visits(db_session, page=1, limit=20, status="scheduled")
+        rows, _next, _total = await get_all_visits(db_session, cursor_payload={}, limit=20, status="scheduled")
 
-        assert "items" in result
+        assert isinstance(rows, list)

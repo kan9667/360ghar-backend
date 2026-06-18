@@ -27,6 +27,7 @@ from app.mcp.chatgpt.response_formatter import (
 from app.mcp.user.server import user_mcp
 from app.mcp.utils import get_user_from_mcp_context
 from app.schemas.visit import VisitCreate
+from app.services.visit import get_user_visits
 
 logger = get_logger(__name__)
 
@@ -211,8 +212,6 @@ async def visits_list(
         List of visits with statistics.
     """
     try:
-        from app.services.visit import get_user_visits
-
         limit = min(max(1, limit), 50)
         page = max(1, page)
 
@@ -226,14 +225,14 @@ async def visits_list(
                 )
 
             # Get user's visits
-            result = await get_user_visits(db, user.id)
+            rows, _next, _total = await get_user_visits(db, user.id, cursor_payload={}, limit=50)
 
-            all_visits = result.get("visits", [])
+            all_visits = rows
             counts = {
-                "total": result.get("total", 0),
-                "upcoming": result.get("upcoming", 0),
-                "completed": result.get("completed", 0),
-                "cancelled": result.get("cancelled", 0),
+                "total": len(rows),
+                "upcoming": 0,
+                "completed": 0,
+                "cancelled": 0,
             }
 
             # Filter by status if provided

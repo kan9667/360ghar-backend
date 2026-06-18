@@ -156,14 +156,12 @@ class TestGetUserBookings:
         """Test getting all bookings for a user."""
         from app.services.booking import get_user_bookings
 
-        result = await get_user_bookings(db_session, test_user.id)
+        rows, next_payload, count_total = await get_user_bookings(db_session, test_user.id, cursor_payload={}, limit=100)
 
-        assert "bookings" in result
-        assert "total" in result
-        assert "upcoming" in result
-        assert "completed" in result
-        assert "cancelled" in result
-        assert result["total"] == len(test_bookings)
+        assert isinstance(rows, list)
+        assert next_payload is None or isinstance(next_payload, dict)
+        assert count_total is None
+        assert len(rows) == len(test_bookings)
 
     @pytest.mark.asyncio
     async def test_get_user_bookings_empty(self, db_session: AsyncSession, test_user_2):
@@ -171,10 +169,8 @@ class TestGetUserBookings:
         from app.services.booking import get_user_bookings
 
         # test_user_2 has no bookings in this scenario
-        result = await get_user_bookings(db_session, 99999)  # Non-existent user
-
-        assert result["total"] == 0
-        assert len(result["bookings"]) == 0
+        rows, _next, _total = await get_user_bookings(db_session, 99999, cursor_payload={}, limit=100)
+        assert len(rows) == 0
 
 
 class TestGetUserUpcomingBookings:
@@ -190,10 +186,8 @@ class TestGetUserUpcomingBookings:
         """Test getting upcoming bookings."""
         from app.services.booking import get_user_upcoming_bookings
 
-        result = await get_user_upcoming_bookings(db_session, test_user.id)
-
-        assert "bookings" in result
-        assert "total" in result
+        rows, _next, _total = await get_user_upcoming_bookings(db_session, test_user.id, cursor_payload={}, limit=100)
+        assert isinstance(rows, list)
 
 
 class TestGetUserPastBookings:
@@ -209,9 +203,8 @@ class TestGetUserPastBookings:
         """Test getting past bookings."""
         from app.services.booking import get_user_past_bookings
 
-        result = await get_user_past_bookings(db_session, test_user.id)
-
-        assert "bookings" in result
+        rows, _next, _total = await get_user_past_bookings(db_session, test_user.id, cursor_payload={}, limit=100)
+        assert isinstance(rows, list)
 
 
 class TestBookingStatusTransitions:

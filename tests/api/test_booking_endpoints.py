@@ -179,13 +179,13 @@ class TestGetUserBookingsEndpoint:
             "app.api.api_v1.endpoints.bookings.get_user_bookings",
             new_callable=AsyncMock,
         ) as mock_get:
-            mock_get.return_value = create_mock_booking_list()
+            mock_get.return_value = ([], None, None)
 
             response = await authenticated_client.get("/api/v1/bookings/")
 
             assert response.status_code == 200
             data = response.json()
-            assert "bookings" in data
+            assert "items" in data
 
 
 class TestCancelBookingEndpoint:

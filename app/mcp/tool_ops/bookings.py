@@ -171,18 +171,15 @@ async def list_user_bookings(
     """List bookings for a user."""
     limit = min(max(1, limit), 100)
 
-    data = await booking_svc.get_user_bookings(db, user_id)
+    rows, _next, _total = await booking_svc.get_user_bookings(db, user_id, cursor_payload={}, limit=limit)
 
-    bookings = data.get("bookings", [])
+    bookings = rows
 
     if status:
         status_norm = status.lower()
         bookings = [b for b in bookings if getattr(b, "booking_status", "") == status_norm]
 
-    offset = (page - 1) * limit
-    paginated = bookings[offset : offset + limit]
-
-    items = [serialize_booking(b) for b in paginated]
+    items = [serialize_booking(b) for b in bookings]
 
     total = len(bookings)
     upcoming = sum(1 for b in bookings if getattr(b, "booking_status", "") == "confirmed")

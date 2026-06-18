@@ -75,23 +75,21 @@ async def agent_bookings_list_all(
             if user_role == UserRole.agent and user.agent_id:
                 filter_agent_id = user.agent_id
 
-            data = await booking_svc.get_all_bookings(
+            rows, _next, _total = await booking_svc.get_all_bookings(
                 db,
-                page=page,
+                cursor_payload={},
                 limit=limit,
+                with_total=False,
                 status=status,
                 filter_agent_id=filter_agent_id,
                 property_id=property_id,
                 user_id=None,
             )
 
-            items = [serialize_booking(b) for b in data.get("bookings", [])]
+            items = [serialize_booking(b) for b in rows]
 
             return MCPResponse.success({
-                "total": data.get("total", 0),
-                "upcoming": data.get("upcoming", 0),
-                "completed": data.get("completed", 0),
-                "cancelled": data.get("cancelled", 0),
+                "total": len(items),
                 "page": page,
                 "limit": limit,
                 "bookings": items,

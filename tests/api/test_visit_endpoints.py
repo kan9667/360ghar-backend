@@ -157,13 +157,13 @@ class TestGetUserVisitsEndpoint:
             "app.api.api_v1.endpoints.visits.get_user_visits",
             new_callable=AsyncMock,
         ) as mock_get:
-            mock_get.return_value = create_mock_visit_list()
+            mock_get.return_value = ([], None, None)
 
             response = await authenticated_client.get("/api/v1/visits/")
 
             assert response.status_code == 200
             data = response.json()
-            assert "visits" in data
+            assert "items" in data
 
 
 class TestGetUpcomingVisitsEndpoint:
@@ -172,18 +172,17 @@ class TestGetUpcomingVisitsEndpoint:
     @pytest.mark.asyncio
     async def test_get_upcoming_visits(self, authenticated_client: AsyncClient):
         """Test getting upcoming visits."""
-        # Patch at the service module level since it's imported inside the endpoint
         with patch(
-            "app.services.visit.get_user_upcoming_visits",
+            "app.api.api_v1.endpoints.visits.get_user_upcoming_visits",
             new_callable=AsyncMock,
         ) as mock_get:
-            mock_get.return_value = create_mock_visit_slice()
+            mock_get.return_value = ([], None, None)
 
             response = await authenticated_client.get("/api/v1/visits/upcoming/")
 
             assert response.status_code == 200
             data = response.json()
-            assert "visits" in data
+            assert "items" in data
 
 
 class TestGetPastVisitsEndpoint:
@@ -192,18 +191,17 @@ class TestGetPastVisitsEndpoint:
     @pytest.mark.asyncio
     async def test_get_past_visits(self, authenticated_client: AsyncClient):
         """Test getting past visits."""
-        # Patch at the service module level since it's imported inside the endpoint
         with patch(
-            "app.services.visit.get_user_past_visits",
+            "app.api.api_v1.endpoints.visits.get_user_past_visits",
             new_callable=AsyncMock,
         ) as mock_get:
-            mock_get.return_value = create_mock_visit_slice()
+            mock_get.return_value = ([], None, None)
 
             response = await authenticated_client.get("/api/v1/visits/past/")
 
             assert response.status_code == 200
             data = response.json()
-            assert "visits" in data
+            assert "items" in data
 
 
 class TestCancelVisitEndpoint:

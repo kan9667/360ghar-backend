@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -5,15 +7,13 @@ from app.api.api_v1.dependencies.auth import get_current_active_user
 from app.core.database import get_db
 from app.models.enums import UserRole
 from app.models.users import User
-from app.schemas.common import PaginatedResponse
+from app.schemas.pagination import CursorPage, CursorParams, build_cursor_page
 from app.schemas.visit import (
     Visit,
     VisitCancel,
     VisitComplete,
     VisitCreate,
-    VisitList,
     VisitReschedule,
-    VisitSlice,
     VisitUpdate,
 )
 from app.services.pm_authz import can_access_visit
@@ -21,6 +21,8 @@ from app.services.visit import (
     cancel_visit,
     create_visit,
     get_all_visits,
+    get_user_past_visits,
+    get_user_upcoming_visits,
     get_user_visits,
     get_visit,
     mark_visit_completed,
@@ -39,39 +41,60 @@ async def schedule_visit(
 ):
     return await create_visit(db, current_user.id, visit)
 
-@router.get("", response_model=VisitList)
+@router.get("", response_model=CursorPage[Visit])
 async def get_my_visits(
+    page: CursorParams = Depends(),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    return await get_user_visits(db, current_user.id)
+    rows, next_payload, total = await get_user_visits(
+        db, current_user.id,
+        cursor_payload=page.decoded(), limit=page.limit, with_total=page.include_total,
+    )
+    return build_cursor_page(
+        [Visit.model_validate(r, from_attributes=True) for r in rows],
+        limit=page.limit, next_payload=next_payload, total=total,
+    )
 
-@router.get("/upcoming", response_model=VisitSlice)
+@router.get("/upcoming", response_model=CursorPage[Visit])
 async def get_upcoming_visits(
+    page: CursorParams = Depends(),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    from app.services.visit import get_user_upcoming_visits
-    return await get_user_upcoming_visits(db, current_user.id)
+    rows, next_payload, total = await get_user_upcoming_visits(
+        db, current_user.id,
+        cursor_payload=page.decoded(), limit=page.limit, with_total=page.include_total,
+    )
+    return build_cursor_page(
+        [Visit.model_validate(r, from_attributes=True) for r in rows],
+        limit=page.limit, next_payload=next_payload, total=total,
+    )
 
-@router.get("/past", response_model=VisitSlice)
+@router.get("/past", response_model=CursorPage[Visit])
 async def get_past_visits(
+    page: CursorParams = Depends(),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
-    from app.services.visit import get_user_past_visits
-    return await get_user_past_visits(db, current_user.id)
+    rows, next_payload, total = await get_user_past_visits(
+        db, current_user.id,
+        cursor_payload=page.decoded(), limit=page.limit, with_total=page.include_total,
+    )
+    return build_cursor_page(
+        [Visit.model_validate(r, from_attributes=True) for r in rows],
+        limit=page.limit, next_payload=next_payload, total=total,
+    )
 
-@router.get("/all", response_model=PaginatedResponse)
+@router.get("/all", response_model=CursorPage[Visit])
 async def list_all_visits(
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
+    page: CursorParams = Depends(),
     status: str | None = Query(None),
     agent_id: int | None = Query(None, description="Admin only: filter by agent id"),
     property_id: int | None = Query(None),
     user_id: int | None = Query(None),
     current_user: User = Depends(get_current_active_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Global visits listing. Admins see all; agents see their managed users/properties."""
     effective_agent_id = None
@@ -80,18 +103,23 @@ async def list_all_visits(
     elif current_user.role == UserRole.agent.value:
         effective_agent_id = current_user.agent_id
         if effective_agent_id is None:
-            return {"items": [], "total": 0, "page": page, "limit": limit, "total_pages": 0, "has_next": False, "has_prev": page > 1}
+            return build_cursor_page([], limit=page.limit, next_payload=None, total=0)
     else:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    return await get_all_visits(
+    rows, next_payload, total = await get_all_visits(
         db,
-        page=page,
-        limit=limit,
+        cursor_payload=page.decoded(),
+        limit=page.limit,
+        with_total=page.include_total,
         status=status,
         filter_agent_id=effective_agent_id,
         property_id=property_id,
         user_id=user_id,
+    )
+    return build_cursor_page(
+        [Visit.model_validate(r, from_attributes=True) for r in rows],
+        limit=page.limit, next_payload=next_payload, total=total,
     )
 
 @router.get("/{visit_id}", response_model=Visit)

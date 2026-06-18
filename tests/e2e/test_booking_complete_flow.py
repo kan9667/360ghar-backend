@@ -284,13 +284,7 @@ class TestBookingListingFlow:
         with patch(
             "app.api.api_v1.endpoints.bookings.get_user_bookings", new_callable=AsyncMock
         ) as mock_list:
-            mock_list.return_value = {
-                "bookings": [],
-                "total": 0,
-                "upcoming": 0,
-                "completed": 0,
-                "cancelled": 0,
-            }
+            mock_list.return_value = ([], None, None)
 
             response = await authenticated_client.get(
                 "/api/v1/bookings/",
@@ -298,16 +292,16 @@ class TestBookingListingFlow:
 
             assert response.status_code == 200
             data = response.json()
-            assert "bookings" in data
+            assert "items" in data
 
     @pytest.mark.asyncio
     async def test_list_upcoming_bookings(self, authenticated_client: AsyncClient):
         """Test listing upcoming bookings."""
         with patch(
-            "app.services.booking.get_user_upcoming_bookings",
+            "app.api.api_v1.endpoints.bookings.get_user_upcoming_bookings",
             new_callable=AsyncMock,
         ) as mock_list:
-            mock_list.return_value = {"bookings": [], "total": 0}
+            mock_list.return_value = ([], None, None)
 
             response = await authenticated_client.get(
                 "/api/v1/bookings/upcoming/",
