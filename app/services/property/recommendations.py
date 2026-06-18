@@ -1,5 +1,7 @@
 """Property recommendation logic."""
 
+from __future__ import annotations
+
 import json
 
 from sqlalchemy import func, or_, select
@@ -11,6 +13,7 @@ from app.core.db_resilience import execute_with_transient_retry
 from app.core.logging import get_logger
 from app.models.enums import PG_FLATMATE_TYPES
 from app.models.properties import Property, PropertyAmenity
+from app.schemas.pagination import offset_payload, read_offset
 from app.schemas.property import Property as PropertySchema
 
 logger = get_logger(__name__)
@@ -22,18 +25,30 @@ def _anon_cache_key(limit: int) -> str:
     return f"recs:anon:v1:l{limit}"
 
 
-async def get_property_recommendations(db: AsyncSession, user_id: int | None, limit: int = 10):
+async def get_property_recommendations(
+    db: AsyncSession,
+    user_id: int | None,
+    cursor_payload: dict,
+    limit: int = 10,
+    *,
+    with_total: bool = False,
+) -> tuple[list[PropertySchema], dict | None, int | None]:
     """Get property recommendations for a user"""
     logger.info("Getting property recommendations for user %s, limit: %s", user_id, limit)
 
-    # Anonymous recommendations are identical for all users — serve from cache
-    if user_id is None:
+    skip = read_offset(cursor_payload)
+    if user_id is None and skip == 0:
         try:
             cache = get_cache_manager()
             cached = await cache.get(_anon_cache_key(limit))
             if cached is not None:
                 logger.info("Serving anonymous recommendations from cache (limit=%s)", limit)
-                return [PropertySchema.model_validate(p) for p in json.loads(cached)]
+                items = [PropertySchema.model_validate(p) for p in json.loads(cached)]
+                has_more = len(items) > limit
+                if has_more:
+                    items = items[:limit]
+                nxt = offset_payload(limit) if has_more else None
+                return items, nxt, None
         except Exception:
             logger.debug("Cache read failed for anonymous recommendations; falling back to DB")
 
@@ -57,7 +72,8 @@ async def get_property_recommendations(db: AsyncSession, user_id: int | None, li
                     == "live",
                 ),
             )
-            .limit(limit)
+            .offset(skip)
+            .limit(limit + 1)
         )
 
         result = await execute_with_transient_retry(
@@ -65,14 +81,19 @@ async def get_property_recommendations(db: AsyncSession, user_id: int | None, li
             lambda: db.execute(query),
             operation_name="property_recommendations_query",
         )
-        properties = result.scalars().all()
+        properties = list(result.scalars().all())
 
         logger.info("Found %s recommended properties for user %s", len(properties), user_id)
 
+        has_more = len(properties) > limit
+        if has_more:
+            properties = properties[:limit]
+        next_payload: dict | None = offset_payload(skip + limit) if has_more else None
+
         schemas = [PropertySchema.model_validate(prop) for prop in properties]
 
-        # Cache anonymous results
-        if user_id is None:
+        # Cache anonymous first-page results
+        if user_id is None and skip == 0:
             try:
                 cache = get_cache_manager()
                 serialized = json.dumps([s.model_dump(mode="json") for s in schemas])
@@ -80,7 +101,8 @@ async def get_property_recommendations(db: AsyncSession, user_id: int | None, li
             except Exception:
                 logger.debug("Cache write failed for anonymous recommendations")
 
-        return schemas
+        count_total: int | None = None
+        return schemas, next_payload, count_total
     except Exception as e:
         logger.error("Failed to get recommendations for user %s: %s", user_id, e, exc_info=True)
         raise
