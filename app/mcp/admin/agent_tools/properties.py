@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.exceptions import (
+    BadRequestException,
     InsufficientPermissionsError,
     PropertyNotFoundException,
 )
@@ -26,6 +27,7 @@ from app.mcp.admin.agent_tools.common import (
     serialize_user_basic,
     utc_now_iso,
 )
+from app.schemas.pagination import decode_cursor, encode_cursor
 from app.utils.validators import ValidationUtils
 
 
@@ -41,7 +43,7 @@ from app.utils.validators import ValidationUtils
 )
 async def agent_properties_list(
     owner_id: int | None = None,
-    page: int = 1,
+    cursor: str | None = None,
     limit: int = 50,
     occupancy: str | None = None,
     q: str | None = None,
@@ -53,13 +55,14 @@ async def agent_properties_list(
 
     Args:
         owner_id: Filter by specific owner (required for agents)
-        page: Page number
+        cursor: Opaque pagination cursor from a prior response's next_cursor
         limit: Items per page (max 100)
         occupancy: Filter by 'occupied' or 'vacant'
         q: Search query
     """
     try:
         limit = min(max(1, limit), 100)
+        cursor_payload = decode_cursor(cursor) if cursor else {}
 
         async for db in get_db():
             user = await _get_user(db)
@@ -82,13 +85,13 @@ async def agent_properties_list(
             user_schema = UserSchema.model_validate(user)
 
             try:
-                rows, _next, _total = await list_managed_properties(
+                rows, next_payload, _total = await list_managed_properties(
                     db,
                     actor=user_schema,
                     owner_id=owner_id,
                     occupancy=occupancy,
                     q=q,
-                    cursor_payload={},
+                    cursor_payload=cursor_payload,
                     limit=limit,
                 )
             except InsufficientPermissionsError as e:
@@ -101,12 +104,15 @@ async def agent_properties_list(
 
             return MCPResponse.success({
                 "total": len(items),
-                "page": page,
+                "next_cursor": encode_cursor(next_payload) if next_payload else None,
+                "has_more": next_payload is not None,
                 "limit": limit,
                 "items": items,
             }).model_dump()
     except AuthRequiredError:
         raise
+    except BadRequestException as e:
+        return invalid_input_response(str(e))
     except Exception as e:
         logger.error("Error in agent.properties.list: %s", e, exc_info=True)
         return internal_error_response(f"Failed to list properties: {str(e)}")
@@ -195,6 +201,8 @@ async def agent_properties_get(
             }).model_dump()
     except AuthRequiredError:
         raise
+    except BadRequestException as e:
+        return invalid_input_response(str(e))
     except Exception as e:
         logger.error("Error in agent.properties.get: %s", e, exc_info=True)
         return internal_error_response(f"Failed to get property: {str(e)}")
@@ -318,6 +326,8 @@ async def agent_properties_create_for_owner(
             }).model_dump()
     except AuthRequiredError:
         raise
+    except BadRequestException as e:
+        return invalid_input_response(str(e))
     except Exception as e:
         logger.error("Error in agent.properties.create_for_owner: %s", e, exc_info=True)
         return internal_error_response(f"Failed to create property: {str(e)}")
@@ -398,6 +408,8 @@ async def agent_properties_verify(
             }).model_dump()
     except AuthRequiredError:
         raise
+    except BadRequestException as e:
+        return invalid_input_response(str(e))
     except Exception as e:
         logger.error("Error in agent.properties.verify: %s", e, exc_info=True)
         return internal_error_response(f"Failed to verify property: {str(e)}")

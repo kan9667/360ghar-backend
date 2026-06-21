@@ -1,10 +1,13 @@
 # Models package
 # Import all models for easy access
 
+from __future__ import annotations
+
 from .agents import Agent, AgentInteraction
 from .ai_conversations import AIConversation, AIConversationMessage
 from .blogs import BlogCategory, BlogPost, BlogPostCategory, BlogPostTag, BlogTag
 from .bookings import Booking
+from .conversations import Conversation, ConversationParticipant, Message
 from .core import FAQ, AppVersion, BugReport, Page
 from .data_hub import (
     AuctionAlert,
@@ -29,6 +32,7 @@ from .enums import (
     BugStatus,
     BugType,
     ComplaintNature,
+    ConversationApp,
     ConversationSource,
     ConversationStatus,
     DocumentType,
@@ -82,9 +86,7 @@ from .social import (
     FlatmateSuperLikeUsage,
     MatchQnAAnswer,
     UserBlock,
-    UserConversation,
     UserMatch,
-    UserMessage,
     UserReport,
 )
 from .tours import (
@@ -162,10 +164,12 @@ __all__ = [
     # AI Conversations
     "AIConversation",
     "AIConversationMessage",
+    # Generic conversations (all apps)
+    "Conversation",
+    "ConversationParticipant",
+    "Message",
     # Shared social primitives
     "UserMatch",
-    "UserConversation",
-    "UserMessage",
     "FlatmateSuperLikeUsage",
     "UserBlock",
     "UserReport",
@@ -193,6 +197,7 @@ __all__ = [
     "BugStatus",
     "BugType",
     "ComplaintNature",
+    "ConversationApp",
     "ConversationSource",
     "ConversationStatus",
     "DocumentType",

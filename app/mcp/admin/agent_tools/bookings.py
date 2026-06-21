@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.exceptions import BadRequestException
 from app.mcp.admin.agent_tools.common import (
     MCP_SECURITY_SCHEMES_MIXED,
     AuthRequiredError,
@@ -20,6 +21,7 @@ from app.mcp.admin.agent_tools.common import (
     serialize_booking,
 )
 from app.models.enums import UserRole
+from app.schemas.pagination import decode_cursor, encode_cursor
 
 
 @admin_mcp.tool(
@@ -33,23 +35,22 @@ from app.models.enums import UserRole
     },
 )
 async def agent_bookings_list_all(
-    owner_id: int | None = None,
     property_id: int | None = None,
     status: str | None = None,
-    page: int = 1,
+    cursor: str | None = None,
     limit: int = 20,
 ) -> dict[str, Any]:
     """List all bookings for managed properties.
 
     Args:
-        owner_id: Filter by property owner
         property_id: Filter by property
         status: Filter by booking status
-        page: Page number
+        cursor: Opaque pagination cursor from a prior response's next_cursor
         limit: Items per page
     """
     try:
         limit = min(max(1, limit), 100)
+        cursor_payload = decode_cursor(cursor) if cursor else {}
 
         async for db in get_db():
             user = await _get_user(db)
@@ -75,9 +76,9 @@ async def agent_bookings_list_all(
             if user_role == UserRole.agent and user.agent_id:
                 filter_agent_id = user.agent_id
 
-            rows, _next, _total = await booking_svc.get_all_bookings(
+            rows, next_payload, _total = await booking_svc.get_all_bookings(
                 db,
-                cursor_payload={},
+                cursor_payload=cursor_payload,
                 limit=limit,
                 with_total=False,
                 status=status,
@@ -90,12 +91,15 @@ async def agent_bookings_list_all(
 
             return MCPResponse.success({
                 "total": len(items),
-                "page": page,
+                "next_cursor": encode_cursor(next_payload) if next_payload else None,
+                "has_more": next_payload is not None,
                 "limit": limit,
                 "bookings": items,
             }).model_dump()
     except AuthRequiredError:
         raise
+    except BadRequestException as e:
+        return invalid_input_response(str(e))
     except Exception as e:
         logger.error("Error in agent.bookings.list_all: %s", e, exc_info=True)
         return internal_error_response(f"Failed to list bookings: {str(e)}")
@@ -164,6 +168,8 @@ async def agent_bookings_update_status(
             }).model_dump()
     except AuthRequiredError:
         raise
+    except BadRequestException as e:
+        return invalid_input_response(str(e))
     except Exception as e:
         logger.error("Error in agent.bookings.update_status: %s", e, exc_info=True)
         return internal_error_response(f"Failed to update booking status: {str(e)}")
