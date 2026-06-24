@@ -16,6 +16,7 @@ import pytest
 from httpx import AsyncClient
 
 from app.core.exceptions import ServiceUnavailableException
+from app.models.enums import FlatmatesProfileStatus
 
 # =============================================================================
 # DELETE /api/v1/users/me
@@ -186,7 +187,7 @@ class TestDeleteUserService:
 
         # Verification & status
         assert test_user.is_verified is False
-        assert test_user.flatmates_profile_status is None
+        assert test_user.flatmates_profile_status == FlatmatesProfileStatus.draft
         assert test_user.flatmates_onboarding_completed is False
         assert test_user.flatmates_last_active_at is None
         # Auth metadata

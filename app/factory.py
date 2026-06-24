@@ -16,7 +16,7 @@ from app.infrastructure.lifespan import create_lifespan
 from app.infrastructure.mcp import build_mcp_http_apps
 from app.infrastructure.middleware import register_middleware
 from app.infrastructure.routing import register_routes
-    
+
 logger = get_logger(__name__)
 
 # OpenAPI tag descriptions. Tag names mirror the `tags=[...]` arguments used

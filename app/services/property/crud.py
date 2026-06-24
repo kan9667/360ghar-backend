@@ -255,7 +255,7 @@ async def create_property(
         db_property = await repo.create(Property(**property_dict))
 
         if amenity_ids:
-            for amenity_id in amenity_ids:
+            for amenity_id in set(amenity_ids):
                 db.add(PropertyAmenity(property_id=db_property.id, amenity_id=amenity_id))
         if image_urls:
             await _replace_property_images(
@@ -499,7 +499,7 @@ async def update_property(
                 sa_delete(PropertyAmenity).where(PropertyAmenity.property_id == property_id)
             )
             if amenity_ids:
-                for amenity_id in amenity_ids:
+                for amenity_id in set(amenity_ids):
                     db.add(PropertyAmenity(property_id=property_id, amenity_id=amenity_id))
 
         if (

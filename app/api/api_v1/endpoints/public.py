@@ -138,7 +138,7 @@ async def get_public_tour(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tour not found",
-        )
+        ) from None
 
     # Query tour with scenes and hotspots
     query = select(Tour).where(
@@ -317,7 +317,7 @@ async def track_tour_event(
         "heatmap",
         "session_start",
         "session_end",
-        "session_duration",        
+        "session_duration",
     }
     if event_type not in allowed_events:
         raise HTTPException(
