@@ -13,7 +13,7 @@ Both call the shared ``delete_user_account`` service which:
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 from app.core.exceptions import ServiceUnavailableException
 from app.models.enums import FlatmatesProfileStatus
@@ -61,8 +61,6 @@ class TestDeleteAccountViaUsersMe:
 
     @pytest.mark.asyncio
     async def test_supabase_error_returns_500(self, user_client: AsyncClient, test_app):
-        from httpx import ASGITransport, AsyncClient as _AsyncClient
-
         # Starlette's ServerErrorMiddleware re-raises unhandled exceptions after
         # sending the 500 response, so the test transport must not re-raise in
         # order to observe the generic-exception-handler's 500 response.
@@ -72,7 +70,7 @@ class TestDeleteAccountViaUsersMe:
             new_callable=AsyncMock,
             side_effect=Exception("Unexpected error"),
         ):
-            async with _AsyncClient(
+            async with AsyncClient(
                 transport=transport, base_url="http://test", timeout=60.0
             ) as client:
                 response = await client.delete("/api/v1/users/me")

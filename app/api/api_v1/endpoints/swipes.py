@@ -223,7 +223,13 @@ class BatchRemoveRequest(BaseModel):
     property_ids: list[int]
 
 
-@router.post("/batch-remove", response_model=MessageResponse, summary="Batch remove swipes")
+class BatchRemoveResponse(BaseModel):
+    removed_count: int
+    failed_property_ids: list[int] = []
+    message: str
+
+
+@router.post("/batch-remove", response_model=BatchRemoveResponse, summary="Batch remove swipes")
 async def batch_remove_swipes(
     payload: BatchRemoveRequest,
     current_user: UserSchema = Depends(get_current_active_user),
@@ -231,4 +237,8 @@ async def batch_remove_swipes(
 ):
     """Remove many liked swipes for the current user in a single request."""
     deleted = await batch_unswipe(db, current_user.id, payload.property_ids)
-    return MessageResponse(message=f"Removed {deleted} swipes")
+    return BatchRemoveResponse(
+        removed_count=deleted,
+        failed_property_ids=[],
+        message=f"Removed {deleted} swipes",
+    )
