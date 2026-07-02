@@ -7,6 +7,7 @@ participants table, but flatmates usage is always 1:1.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -611,26 +612,55 @@ async def send_message(
     await db.flush()
     await db.refresh(message)
 
-    # --- Push notification to peer ---
+    # --- Push notification to peer (deferred to after_commit so it only fires if the
+    # message actually persists, and uses a background session to avoid holding the request
+    # session open during FCM dispatch). ---
     peer_id = await _find_participant_peer_id(db, conversation.id, user_id)
 
     if peer_id is not None and not await _is_blocked(db, user_id, peer_id):
-        try:
-            from app.services.push_notification import notify_new_message
-
-            async with db.begin_nested():
-                sender = await db.get(User, user_id)
-                sender_name = (sender.full_name if sender else None) or "Someone"
-                await notify_new_message(
-                    db,
-                    recipient_db_id=peer_id,
-                    sender_name=sender_name,
-                    conversation_id=conversation.id,
-                )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Message notification failed (best-effort): %s", exc, exc_info=True)
+        sender = await db.get(User, user_id)
+        sender_name = (sender.full_name if sender else None) or "Someone"
+        _schedule_after_commit_notify(
+            db,
+            peer_id=peer_id,
+            sender_name=sender_name,
+            conversation_id=conversation.id,
+        )
 
     return message
+
+
+def _schedule_after_commit_notify(
+    db: AsyncSession,
+    *,
+    peer_id: int,
+    sender_name: str,
+    conversation_id: int,
+) -> None:
+    """Schedule the new-message push on a background task that runs after the transaction commits."""
+    from sqlalchemy import event
+
+    @event.listens_for(db.sync_session, "after_commit", once=True)
+    def _on_commit(_session: Any) -> None:  # noqa: ANN001
+        async def _bg_notify() -> None:
+            try:
+                from app.core.database import AsyncSessionLocalBG
+                from app.services.push_notification import notify_new_message
+
+                async with AsyncSessionLocalBG() as bg_db:
+                    await notify_new_message(
+                        bg_db,
+                        recipient_db_id=peer_id,
+                        sender_name=sender_name,
+                        conversation_id=conversation_id,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Message notification failed (best-effort): %s", exc, exc_info=True)
+
+        try:
+            asyncio.create_task(_bg_notify())
+        except RuntimeError as exc:
+            logger.warning("Could not schedule message notification task: %s", exc, exc_info=True)
 
 
 async def mark_conversation_read(
