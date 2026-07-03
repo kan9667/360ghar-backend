@@ -138,7 +138,6 @@
   "/api/v1/flatmates/profiles",
   "/api/v1/flatmates/profiles/{user_id}",
   "/api/v1/flatmates/reports",
-  "/api/v1/flatmates/sse",
   "/api/v1/flatmates/swipes",
   "/api/v1/flatmates/visits/{visit_id}",
   "/api/v1/hotspots/{hotspot_id}",

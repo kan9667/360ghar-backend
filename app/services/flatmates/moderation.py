@@ -266,6 +266,7 @@ async def prescreen_flatmate_listing(
 
     result = apply_listing_prescreen_metadata(listing, admin_user_id=admin_user_id)
     await db.flush()
+    await db.commit()
     return {
         "listing_id": listing.id,
         **result,
@@ -330,6 +331,7 @@ async def delete_block(db: AsyncSession, user_id: int, blocked_user_id: int) -> 
         raise BadRequestException(detail="Blocked user not found")
     await db.delete(block)
     await db.flush()
+    await db.commit()
     return {"ok": True, "blocked_user_id": blocked_user_id}
 
 
@@ -365,6 +367,7 @@ async def create_block(db: AsyncSession, user_id: int, blocked_user_id: int) -> 
         match.status = UserMatchStatus.blocked
 
     await db.flush()
+    await db.commit()
     return block
 
 
@@ -513,6 +516,8 @@ async def pause_stale_flatmate_listings(
             await db.flush()
         else:
             break
+    if paused_count:
+        await db.commit()
     return paused_count
 
 
@@ -572,4 +577,5 @@ async def create_report(db: AsyncSession, user_id: int, payload: ReportCreate) -
         )
 
     await db.refresh(report)
+    await db.commit()
     return report

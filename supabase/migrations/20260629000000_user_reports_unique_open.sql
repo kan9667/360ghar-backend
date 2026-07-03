@@ -1,9 +1,9 @@
 -- Enforce at most one OPEN report per (reporter, reported) pair.
--- Backfill: keep the oldest open report per pair, resolve the rest, then add the
+-- Backfill: keep the oldest open report per pair, mark the rest reviewed, then add the
 -- partial unique index that the app-level dedup relies on for race safety.
 
 UPDATE user_reports
-SET status = 'resolved'
+SET status = 'reviewed'
 WHERE id IN (
     SELECT id
     FROM (

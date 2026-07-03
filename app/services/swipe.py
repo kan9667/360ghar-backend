@@ -1,15 +1,25 @@
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import and_, case, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.sql.elements import ColumnElement
 
+from app.config import settings
+from app.core.db_resilience import apply_statement_timeout, execute_with_transient_retry
 from app.core.utils import utc_now
 from app.models.properties import Amenity, Property, PropertyAmenity
 from app.models.users import UserSwipe
 from app.schemas.pagination import offset_payload, read_offset
 from app.schemas.property import PropertySwipe, SortBy, UnifiedPropertyFilter
 from app.utils.geo import normalize_city
+
+
+def _property_ts_vector_column() -> ColumnElement[Any]:
+    """Return the trigger-maintained indexed FTS column for property search."""
+    return Property.__table__.c["__ts_vector__"]
 
 
 async def record_swipe(db: AsyncSession, user_id: int, swipe_data: PropertySwipe):
@@ -92,6 +102,7 @@ async def get_swipe_history(
     with_total: bool = False,
 ) -> tuple[list, dict | None, int | None]:
     """Get user's swipe history with comprehensive property filtering"""
+    await apply_statement_timeout(db, settings.DB_READ_STATEMENT_TIMEOUT_MS)
     offset = read_offset(cursor_payload)
 
     # Base query with optimized eager loading
@@ -142,15 +153,10 @@ async def get_swipe_history(
 
     # Text search using PostgreSQL full-text search
     search_query_obj = None
+    search_vector = None
     if filters.search_query:
         search_query_obj = func.plainto_tsquery('english', filters.search_query)
-        # Use SQLAlchemy's proper text search functions to avoid SQL injection
-        search_vector = func.to_tsvector('english', func.concat(
-            Property.title, ' ',
-            Property.description, ' ',
-            Property.locality, ' ',
-            Property.city
-        ))
+        search_vector = _property_ts_vector_column()
         conditions.append(search_vector.op('@@')(search_query_obj))
 
     # Property type filter
@@ -222,8 +228,11 @@ async def get_swipe_history(
 
         # Get amenity IDs from names if any
         if amenity_names:
-            amenity_result = await db.execute(
-                select(Amenity.id).where(Amenity.title.in_(amenity_names))
+            amenity_stmt = select(Amenity.id).where(Amenity.title.in_(amenity_names))
+            amenity_result = await execute_with_transient_retry(
+                db,
+                lambda: db.execute(amenity_stmt),
+                operation_name="swipe_history_amenities",
             )
             amenity_ids.extend([row[0] for row in amenity_result.fetchall()])
 
@@ -258,14 +267,7 @@ async def get_swipe_history(
         query = query.order_by(desc(UserSwipe.created_at))
     elif sort_by == SortBy.popular:
         query = query.order_by(Property.like_count.desc(), Property.view_count.desc())
-    elif sort_by == SortBy.relevance and search_query_obj is not None:
-        # Calculate relevance score using SQLAlchemy functions
-        search_vector = func.to_tsvector('english', func.concat(
-            Property.title, ' ',
-            Property.description, ' ',
-            Property.locality, ' ',
-            Property.city
-        ))
+    elif sort_by == SortBy.relevance and search_query_obj is not None and search_vector is not None:
         relevance_score = func.ts_rank(search_vector, search_query_obj)
         query = query.order_by(relevance_score.desc())
     else:
@@ -275,14 +277,22 @@ async def get_swipe_history(
     # Compute total count before applying offset/limit if requested
     count_total: int | None = None
     if with_total:
-        count_result = await db.execute(count_query)
+        count_result = await execute_with_transient_retry(
+            db,
+            lambda: db.execute(count_query),
+            operation_name="swipe_history_count",
+        )
         count_total = int(count_result.scalar() or 0)
 
     # Add cursor-based offset pagination
     query = query.offset(offset).limit(limit + 1)
 
     # Execute main query
-    result = await db.execute(query)
+    result = await execute_with_transient_retry(
+        db,
+        lambda: db.execute(query),
+        operation_name="swipe_history_query",
+    )
 
     # Handle results - check if we have additional columns (distance)
     if distance is not None:
@@ -353,13 +363,18 @@ async def toggle_swipe(db: AsyncSession, swipe_id: int, user_id: int):
 
 async def get_swipe_stats(db: AsyncSession, user_id: int):
     """Get swipe statistics"""
+    await apply_statement_timeout(db, settings.DB_READ_STATEMENT_TIMEOUT_MS)
     stmt = select(
         func.count(UserSwipe.id).label('total_swipes'),
         func.sum(case((UserSwipe.is_liked, 1), else_=0)).label('liked_count'),
         func.sum(case((~UserSwipe.is_liked, 1), else_=0)).label('disliked_count')
     ).where(UserSwipe.user_id == user_id)
 
-    result = await db.execute(stmt)
+    result = await execute_with_transient_retry(
+        db,
+        lambda: db.execute(stmt),
+        operation_name="swipe_stats",
+    )
     stats = result.one()
 
     total = stats.total_swipes or 0

@@ -17,6 +17,9 @@ Active contributors: Saksham, Ravi
 | `SUPABASE_PUBLISHABLE_KEY` | Supabase anon/publishable key. |
 | `SUPABASE_SECRET_KEY` | Supabase service-role key (admin operations like user deletion). |
 | `SUPABASE_WEBHOOK_SECRET` | HMAC secret for verifying inbound Supabase webhooks. Generate with `openssl rand -hex 32`. |
+| `AUTH_USER_CACHE_TTL_SECONDS` | Short-lived TTL for Supabase auth subject -> local user snapshot caching. Default `45`. |
+| `FLATMATES_REALTIME_ENABLED` | Enables Supabase Realtime private Broadcast publishing for flatmates app-wide events. Default `true`. |
+| `SUPABASE_REALTIME_BROADCAST_TIMEOUT_SECONDS` | Per-request timeout for backend calls to the Supabase Realtime Broadcast API. Default `2`. |
 | `GOOGLE_WEB_CLIENT_ID`, `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_ANDROID_CLIENT_ID` | Google OAuth client IDs, surfaced via `GET /api/v1/auth/config`. Optional. |
 
 ## Redis and cache
@@ -81,7 +84,9 @@ Active contributors: Saksham, Ravi
 | `PUBLIC_BASE_URL` | Public API URL for OAuth metadata, MCP resource URIs, share previews. Required in production. |
 | `PUBLIC_APP_URL` | Frontend URL for share previews. |
 | `SENTRY_DSN` | Sentry project DSN. When unset, error tracking is disabled. |
-| `SENTRY_TRACES_SAMPLE_RATE` | Performance sample rate (default 0.5 dev, 0.05 prod). |
+| `SENTRY_ENABLE_TRACING` | Enables Sentry performance tracing. Defaults to `false` so small-tier deployments send errors only unless explicitly opted in. |
+| `SENTRY_TRACES_SAMPLE_RATE` | Performance sample rate used only when `SENTRY_ENABLE_TRACING=true`. Defaults to `0.05` when tracing is enabled and no explicit rate is set. |
+| `SENTRY_ENABLE_SQLALCHEMY_TRACING` | Enables Sentry SQLAlchemy instrumentation. Defaults to `false` to avoid SQL query tracing overhead and event volume on small-tier Sentry projects. |
 | `ENABLE_SENTRY_TEST_ENDPOINT` | Opt-in local/test diagnostic flag for mounting `GET /debug-sentry`, which intentionally raises a Sentry test exception. Defaults to `false` and is ignored in production. |
 
 ## CORS

@@ -14,6 +14,12 @@ from app.core.db_resilience import (
 from app.core.logging import get_logger
 from app.models.enums import UserRole
 from app.models.users import User
+from app.services.auth_user_cache import (
+    AuthUserSnapshot,
+    cache_auth_user,
+    get_cached_auth_user,
+    snapshot_from_user,
+)
 from app.services.user import get_or_create_user_from_supabase
 
 logger = get_logger(__name__)
@@ -214,6 +220,123 @@ async def get_current_active_user(
             },
         )
     return current_user
+
+
+async def get_current_cached_active_user(
+    request: Request,
+    authorization: str | None = Header(None),
+    db: AsyncSession = Depends(get_db),
+) -> AuthUserSnapshot:
+    """Resolve active user through a short-lived local auth snapshot cache."""
+    token = _parse_bearer_token(authorization)
+
+    try:
+        supabase_user_data = await verify_supabase_token(token)
+        if _is_failure(supabase_user_data):
+            token_suffix = token[-8:] if len(token) > 8 else token
+            reason = supabase_user_data.get("reason")
+            if reason == AuthFailureReason.PROVIDER_UNREACHABLE.value:
+                logger.warning(
+                    "Auth provider unreachable (suffix=%s): %s",
+                    token_suffix,
+                    supabase_user_data.get("error"),
+                    extra={
+                        "reason": "auth_provider_unreachable",
+                        "token_suffix": token_suffix,
+                    },
+                )
+                raise _provider_unavailable_response()
+            logger.warning(
+                "Auth provider error (suffix=%s): %s",
+                token_suffix,
+                supabase_user_data.get("error"),
+                extra={"reason": "auth_provider_error", "token_suffix": token_suffix},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "TOKEN_INVALID",
+                    "message": "Invalid or expired token",
+                },
+            )
+        if not supabase_user_data:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "TOKEN_INVALID",
+                    "message": "Invalid or expired token",
+                },
+            )
+
+        supabase_user_id = str(supabase_user_data.get("id") or "")
+        if supabase_user_id:
+            cached_user = await get_cached_auth_user(supabase_user_id)
+            if cached_user is not None:
+                if not cached_user.is_active:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail={
+                            "code": "USER_INACTIVE",
+                            "message": "Inactive user",
+                        },
+                    )
+                request.state.user_id = cached_user.id
+                request.state.supabase_user_data = supabase_user_data
+                sentry_sdk.set_user({
+                    "id": str(cached_user.id),
+                    "email": cached_user.email,
+                    "username": cached_user.phone,
+                })
+                return cached_user
+
+        db_user = await get_or_create_user_from_supabase(db, supabase_user_data)
+        await db.commit()
+        snapshot = snapshot_from_user(db_user)
+        await cache_auth_user(snapshot)
+
+        if not snapshot.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "USER_INACTIVE",
+                    "message": "Inactive user",
+                },
+            )
+        request.state.user_id = snapshot.id
+        request.state.supabase_user_data = supabase_user_data
+        sentry_sdk.set_user({
+            "id": str(snapshot.id),
+            "email": snapshot.email,
+            "username": snapshot.phone,
+        })
+        return snapshot
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        if is_transient_db_error(exc) or is_statement_timeout(exc):
+            logger.warning(
+                "Cached authentication DB sync temporarily unavailable: %s",
+                exc,
+                exc_info=True,
+                extra={
+                    "reason": "authentication_db_unavailable",
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise _auth_db_unavailable_response(exc) from exc
+        logger.error(
+            "Cached authentication error: %s",
+            exc,
+            exc_info=True,
+            extra={"reason": "authentication_exception", "error_type": type(exc).__name__},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "AUTHENTICATION_FAILED",
+                "message": "Authentication failed",
+            },
+        ) from exc
 
 
 async def get_current_user_sse(

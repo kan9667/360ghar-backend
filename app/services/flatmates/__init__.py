@@ -48,6 +48,10 @@ from app.services.flatmates.profiles import (
     mark_flatmates_notification_read,
     update_flatmates_profile,
 )
+from app.services.flatmates.realtime import (
+    flatmates_realtime_config,
+    queue_flatmates_realtime_event,
+)
 from app.services.flatmates.visits import update_visit_status
 
 __all__ = [
@@ -93,6 +97,9 @@ __all__ = [
     "prescreen_flatmate_listing",
     # visits
     "update_visit_status",
+    # realtime
+    "flatmates_realtime_config",
+    "queue_flatmates_realtime_event",
     # helpers
     "geocode_listing",
 ]

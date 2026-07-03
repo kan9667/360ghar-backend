@@ -31,6 +31,7 @@ from app.services.flatmates.helpers import (
     _ensure_match,
     _is_blocked,
 )
+from app.services.flatmates.realtime import EVENT_NEW_MATCH, queue_flatmates_realtime_event
 
 logger = get_logger(__name__)
 
@@ -101,6 +102,7 @@ async def record_swipe(
                 property_obj.interest_count = (property_obj.interest_count or 0) + 1
 
         await db.flush()
+        await db.commit()
         return {
             "stored": True,
             "action": payload.action,
@@ -197,43 +199,34 @@ async def record_swipe(
                 logger.warning("Match notification failed (best-effort): %s", exc, exc_info=True)
                 pass  # best-effort; never block swipe recording
 
-            # --- SSE events for new match ---
-            try:
-                from app.core.sse import SSE_SWIPE, sse_bus
-
-                assert payload.target_user_id is not None
-                await sse_bus.emit(
-                    user_id,
-                    {
-                        "type": SSE_SWIPE,
-                        "data": {
-                            "target_user_id": payload.target_user_id,
-                            "action": payload.action.value,
-                            "target_type": payload.target_type.value,
-                            "did_match": True,
-                            "match_id": match_id,
-                            "conversation_id": conversation_id,
-                        },
-                    },
-                )
-                await sse_bus.emit(
-                    payload.target_user_id,
-                    {
-                        "type": SSE_SWIPE,
-                        "data": {
-                            "target_user_id": user_id,
-                            "action": payload.action.value,
-                            "target_type": payload.target_type.value,
-                            "did_match": True,
-                            "match_id": match_id,
-                            "conversation_id": conversation_id,
-                        },
-                    },
-                )
-            except Exception:  # noqa: BLE001
-                pass  # best-effort
+            assert payload.target_user_id is not None
+            queue_flatmates_realtime_event(
+                db,
+                user_id=user_id,
+                event_type=EVENT_NEW_MATCH,
+                payload={
+                    "peer_user_id": payload.target_user_id,
+                    "action": payload.action.value,
+                    "target_type": payload.target_type.value,
+                    "match_id": match_id,
+                    "conversation_id": conversation_id,
+                },
+            )
+            queue_flatmates_realtime_event(
+                db,
+                user_id=payload.target_user_id,
+                event_type=EVENT_NEW_MATCH,
+                payload={
+                    "peer_user_id": user_id,
+                    "action": payload.action.value,
+                    "target_type": payload.target_type.value,
+                    "match_id": match_id,
+                    "conversation_id": conversation_id,
+                },
+            )
 
     await db.flush()
+    await db.commit()
     return {
         "stored": True,
         "action": payload.action,
@@ -459,6 +452,7 @@ async def unmatch_user_pair(db: AsyncSession, user_id: int, other_user_id: int) 
     if conversation:
         conversation.status = ConversationStatus.closed
     await db.flush()
+    await db.commit()
     return {"id": match.id, "status": match.status, "unmatched": True}
 
 
@@ -482,4 +476,5 @@ async def unmatch_match(db: AsyncSession, user_id: int, match_id: int) -> dict[s
         conversation.status = ConversationStatus.closed
 
     await db.flush()
+    await db.commit()
     return {"id": match.id, "status": match.status, "unmatched": True}

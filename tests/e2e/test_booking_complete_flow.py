@@ -97,7 +97,7 @@ class TestBookingCompleteFlow:
 
         # Step 1: Search for properties - use dict instead of ORM object
         with patch(
-            "app.api.api_v1.endpoints.properties.get_unified_properties_optimized",
+            "app.api.api_v1.endpoints.properties.run_property_search",
             new_callable=AsyncMock,
         ) as mock_search:
             mock_search.return_value = (

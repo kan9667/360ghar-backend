@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
 from app.config import settings
+from app.core.db_resilience import apply_statement_timeout, execute_with_transient_retry
 from app.core.exceptions import BadRequestException, ConflictException
 from app.core.logging import get_logger
 from app.models.conversations import Conversation, ConversationParticipant
@@ -241,6 +242,7 @@ async def get_user_visits(
     with_total: bool = False,
 ) -> tuple[list, dict | None, int | None]:
     """Get all visits for a user (keyset-paginated)."""
+    await apply_statement_timeout(db, settings.DB_READ_STATEMENT_TIMEOUT_MS)
     stmt = (
         select(Visit)
         .options(*_visit_load_options())
@@ -248,12 +250,23 @@ async def get_user_visits(
     )
     count_total = None
     if with_total:
-        count_total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        count_result = await execute_with_transient_retry(
+            db,
+            lambda: db.execute(count_stmt),
+            operation_name="visit_user_list_count",
+        )
+        count_total = count_result.scalar_one()
     predicate = keyset_filter(Visit.scheduled_date, Visit.id, cursor_payload, descending=True)
     if predicate is not None:
         stmt = stmt.where(predicate)
     stmt = stmt.order_by(Visit.scheduled_date.desc(), Visit.id.desc()).limit(limit + 1)
-    rows = list((await db.execute(stmt)).scalars().all())
+    result = await execute_with_transient_retry(
+        db,
+        lambda: db.execute(stmt),
+        operation_name="visit_user_list_query",
+    )
+    rows = list(result.scalars().all())
     next_payload = None
     if len(rows) > limit:
         rows = rows[:limit]
@@ -268,6 +281,7 @@ async def get_user_upcoming_visits(
     with_total: bool = False,
 ) -> tuple[list, dict | None, int | None]:
     """Get upcoming visits for a user (keyset-paginated)."""
+    await apply_statement_timeout(db, settings.DB_READ_STATEMENT_TIMEOUT_MS)
     now = datetime.now(timezone.utc)
     stmt = (
         select(Visit)
@@ -280,12 +294,23 @@ async def get_user_upcoming_visits(
     )
     count_total = None
     if with_total:
-        count_total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        count_result = await execute_with_transient_retry(
+            db,
+            lambda: db.execute(count_stmt),
+            operation_name="visit_upcoming_list_count",
+        )
+        count_total = count_result.scalar_one()
     predicate = keyset_filter(Visit.scheduled_date, Visit.id, cursor_payload, descending=False)
     if predicate is not None:
         stmt = stmt.where(predicate)
     stmt = stmt.order_by(Visit.scheduled_date.asc(), Visit.id.asc()).limit(limit + 1)
-    rows = list((await db.execute(stmt)).scalars().all())
+    result = await execute_with_transient_retry(
+        db,
+        lambda: db.execute(stmt),
+        operation_name="visit_upcoming_list_query",
+    )
+    rows = list(result.scalars().all())
     next_payload = None
     if len(rows) > limit:
         rows = rows[:limit]
@@ -300,6 +325,7 @@ async def get_user_past_visits(
     with_total: bool = False,
 ) -> tuple[list, dict | None, int | None]:
     """Get past visits for a user (keyset-paginated)."""
+    await apply_statement_timeout(db, settings.DB_READ_STATEMENT_TIMEOUT_MS)
     now = datetime.now(timezone.utc)
     stmt = (
         select(Visit)
@@ -311,12 +337,23 @@ async def get_user_past_visits(
     )
     count_total = None
     if with_total:
-        count_total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        count_result = await execute_with_transient_retry(
+            db,
+            lambda: db.execute(count_stmt),
+            operation_name="visit_past_list_count",
+        )
+        count_total = count_result.scalar_one()
     predicate = keyset_filter(Visit.scheduled_date, Visit.id, cursor_payload, descending=True)
     if predicate is not None:
         stmt = stmt.where(predicate)
     stmt = stmt.order_by(Visit.scheduled_date.desc(), Visit.id.desc()).limit(limit + 1)
-    rows = list((await db.execute(stmt)).scalars().all())
+    result = await execute_with_transient_retry(
+        db,
+        lambda: db.execute(stmt),
+        operation_name="visit_past_list_query",
+    )
+    rows = list(result.scalars().all())
     next_payload = None
     if len(rows) > limit:
         rows = rows[:limit]
@@ -491,6 +528,7 @@ async def get_agent_visits(
     with_total: bool = False,
 ) -> tuple[list[VisitSchema], dict | None, int | None]:
     """Get visits handled by a specific agent (keyset-paginated)."""
+    await apply_statement_timeout(db, settings.DB_READ_STATEMENT_TIMEOUT_MS)
     stmt = (
         select(Visit)
         .options(*_visit_load_options())
@@ -500,14 +538,22 @@ async def get_agent_visits(
     count_total = None
     if with_total:
         count_stmt = select(func.count()).where(Visit.agent_id == agent_id)
-        count_result = await db.execute(count_stmt)
+        count_result = await execute_with_transient_retry(
+            db,
+            lambda: db.execute(count_stmt),
+            operation_name="visit_agent_list_count",
+        )
         count_total = count_result.scalar_one()
 
     predicate = keyset_filter(Visit.scheduled_date, Visit.id, cursor_payload, descending=True)
     if predicate is not None:
         stmt = stmt.where(predicate)
     stmt = stmt.order_by(Visit.scheduled_date.desc(), Visit.id.desc()).limit(limit + 1)
-    result = await db.execute(stmt)
+    result = await execute_with_transient_retry(
+        db,
+        lambda: db.execute(stmt),
+        operation_name="visit_agent_list_query",
+    )
     rows = list(result.scalars().all())
 
     next_payload = None
@@ -585,6 +631,7 @@ async def get_all_visits(
     user_id: int | None = None,
 ) -> tuple[list, dict | None, int | None]:
     """Global visit listing with optional filters and keyset pagination."""
+    await apply_statement_timeout(db, settings.DB_READ_STATEMENT_TIMEOUT_MS)
     Owner = aliased(User)
 
     stmt = select(Visit).options(*_visit_load_options())
@@ -605,13 +652,24 @@ async def get_all_visits(
 
     count_total = None
     if with_total:
-        count_total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        count_result = await execute_with_transient_retry(
+            db,
+            lambda: db.execute(count_stmt),
+            operation_name="visit_all_list_count",
+        )
+        count_total = count_result.scalar_one()
 
     predicate = keyset_filter(Visit.scheduled_date, Visit.id, cursor_payload, descending=True)
     if predicate is not None:
         stmt = stmt.where(predicate)
     stmt = stmt.order_by(Visit.scheduled_date.desc(), Visit.id.desc()).limit(limit + 1)
-    rows = list((await db.execute(stmt)).scalars().all())
+    result = await execute_with_transient_retry(
+        db,
+        lambda: db.execute(stmt),
+        operation_name="visit_all_list_query",
+    )
+    rows = list(result.scalars().all())
     next_payload = None
     if len(rows) > limit:
         rows = rows[:limit]

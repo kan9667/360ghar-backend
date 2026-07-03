@@ -55,7 +55,9 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
     SENTRY_DSN: str | None = None
-    SENTRY_TRACES_SAMPLE_RATE: float | None = None  # Free tier default: 0.5 dev, 0.05 prod
+    SENTRY_ENABLE_TRACING: bool = False
+    SENTRY_ENABLE_SQLALCHEMY_TRACING: bool = False
+    SENTRY_TRACES_SAMPLE_RATE: float | None = None
     ENABLE_SENTRY_TEST_ENDPOINT: bool = False
     VALID_API_KEYS: str = ""  # API keys for middleware (comma-separated)
 
@@ -202,6 +204,11 @@ class Settings(BaseSettings):
     CACHE_TTL_BLOG_TAGS: int = 86400  # 24 hours
     CACHE_TTL_FAQS: int = 86400  # 24 hours
     CACHE_TTL_VERSIONS: int = 3600  # 1 hour
+    AUTH_USER_CACHE_TTL_SECONDS: int = 45
+
+    # ── Flatmates Realtime ────────────────────────────────────────────────────
+    FLATMATES_REALTIME_ENABLED: bool = True
+    SUPABASE_REALTIME_BROADCAST_TIMEOUT_SECONDS: float = 2.0
 
     # ── AI Providers ─────────────────────────────────────────────────────────────
     # Gemini

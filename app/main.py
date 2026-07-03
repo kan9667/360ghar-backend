@@ -5,7 +5,6 @@ import logging
 
 import sentry_sdk
 import sentry_sdk.integrations.fastapi
-import sentry_sdk.integrations.sqlalchemy
 import yaml  # type: ignore[import-untyped]
 from dotenv import load_dotenv
 from fastapi.responses import Response
@@ -37,29 +36,43 @@ def _sentry_before_send(event, hint):
 
 # Initialize Sentry
 if settings.SENTRY_DSN:
-    _is_dev = settings.ENVIRONMENT == "development"
+    sentry_integrations = [
+        sentry_sdk.integrations.fastapi.FastApiIntegration(),
+        LoggingIntegration(
+            level=logging.WARNING,
+            event_level=None,
+        ),
+    ]
+    if settings.SENTRY_ENABLE_SQLALCHEMY_TRACING:
+        from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+
+        sentry_integrations.append(SqlalchemyIntegration())
+
+    traces_sample_rate = None
+    if settings.SENTRY_ENABLE_TRACING:
+        traces_sample_rate = (
+            settings.SENTRY_TRACES_SAMPLE_RATE
+            if settings.SENTRY_TRACES_SAMPLE_RATE is not None
+            else 0.05
+        )
+
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN,
         environment=settings.ENVIRONMENT,
-        # Free tier: keep traces low to stay within quota (100K/mo)
-        traces_sample_rate=(
-            settings.SENTRY_TRACES_SAMPLE_RATE
-            if settings.SENTRY_TRACES_SAMPLE_RATE is not None
-            else (0.5 if _is_dev else 0.05)
-        ),
+        traces_sample_rate=traces_sample_rate,
         send_default_pii=False,
         release=f"360ghar-backend@{settings.APP_VERSION}",
         before_send=_sentry_before_send,
-        integrations=[
-            sentry_sdk.integrations.fastapi.FastApiIntegration(),
-            sentry_sdk.integrations.sqlalchemy.SqlalchemyIntegration(),
-            LoggingIntegration(
-                level=logging.WARNING,
-                event_level=None,
-            ),
-        ],
+        integrations=sentry_integrations,
     )
-    logger.info("Sentry initialized", extra={"environment": settings.ENVIRONMENT})
+    logger.info(
+        "Sentry initialized",
+        extra={
+            "environment": settings.ENVIRONMENT,
+            "tracing_enabled": settings.SENTRY_ENABLE_TRACING,
+            "sqlalchemy_tracing_enabled": settings.SENTRY_ENABLE_SQLALCHEMY_TRACING,
+        },
+    )
 else:
     logger.warning("Sentry DSN not configured - error tracking disabled")
 

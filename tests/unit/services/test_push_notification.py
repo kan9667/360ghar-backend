@@ -179,6 +179,34 @@ class TestNotifyDeepLinks:
             assert "boosted for 24 hours" in call_kwargs["body"]
 
     @pytest.mark.asyncio
+    async def test_listing_approved_can_publish_realtime_immediately(self, mock_db_session):
+        with (
+            patch(
+                "app.services.notification_dispatcher.dispatch_notification_to_user",
+                new_callable=AsyncMock,
+                return_value={"ok": True},
+            ),
+            patch(
+                "app.services.flatmates.realtime.publish_flatmates_realtime_event",
+                new_callable=AsyncMock,
+            ) as mock_publish,
+            patch("app.services.flatmates.realtime.queue_flatmates_realtime_event") as mock_queue,
+        ):
+            await notify_listing_approved(
+                mock_db_session,
+                recipient_db_id=1,
+                listing_title="Room A",
+                realtime_publish_immediately=True,
+            )
+
+            mock_queue.assert_not_called()
+            mock_publish.assert_awaited_once()
+            event_payload = mock_publish.await_args.args[0]
+            assert event_payload.user_id == 1
+            assert event_payload.event_type == "new_notification"
+            assert event_payload.payload["type_key"] == "flatmate_listing_approved"
+
+    @pytest.mark.asyncio
     async def test_visit_routes(self, mock_db_session):
         with patch(
             "app.services.notification_dispatcher.dispatch_notification_to_user",

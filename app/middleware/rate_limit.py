@@ -113,7 +113,6 @@ class RateLimitMiddleware:
         # connect. List them explicitly so new routes can't be silently exempted
         # by an accidental ``/sse`` suffix match.
         sse_paths = {
-            "/api/v1/flatmates/sse",
             "/api/v1/notifications/sse",
         }
         if path in sse_paths:

@@ -284,7 +284,7 @@ class TestListProperties:
         )
 
         assert response.status_code == 400
-        assert response.json()["detail"] == "semantic_search requires a search query (q)"
+        assert response.json()["error"]["message"] == "semantic_search requires a search query (q)"
 
     @pytest.mark.asyncio
     async def test_semantic_search_uses_shared_orchestration(self, client: AsyncClient):

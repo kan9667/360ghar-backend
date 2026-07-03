@@ -28,7 +28,7 @@ Sentry initializes when `SENTRY_DSN` is set. Key config: `send_default_pii=False
 
 ## SSE monitoring
 
-The SSE event bus in `app/core/sse.py` is per-user, not system-wide. Services emit events (`new_match`, `new_message`, `conversation_updated`, `visit_updated`, `listing_status_changed`, `new_notification`) after a DB commit, and `GET /api/v1/flatmates/sse` consumes from the user's queue with a 30s keepalive. The bus drops the oldest event on queue full and reaps dead queues, so a slow consumer does not destabilize the process. There is no system-wide SSE stream for ops monitoring - use logs and Sentry for that.
+Flatmates realtime is per-user, not system-wide. Services queue Supabase Realtime Broadcast events (`new_match`, `new_message`, `conversation_updated`, `visit_updated`, `listing_status_changed`, `new_notification`) and publish after DB commit to private `flatmates:user:{local_user_id}` channels. There is no system-wide realtime stream for ops monitoring - use logs and Sentry for that.
 
 ## Further reading
 

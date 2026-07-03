@@ -44,6 +44,11 @@ from app.services.flatmates.helpers import (
     _canonical_pair,
     _is_blocked,
 )
+from app.services.flatmates.realtime import (
+    EVENT_CONVERSATION_UPDATED,
+    EVENT_NEW_MESSAGE,
+    queue_flatmates_realtime_event,
+)
 from app.utils.validators import ValidationUtils
 
 logger = get_logger(__name__)
@@ -266,9 +271,17 @@ async def create_conversation_from_payload(
         conversation.last_message_preview = payload.initial_message.strip()
         await db.flush()
         await db.refresh(message)
+        _queue_message_realtime_events(
+            db,
+            conversation_id=conversation.id,
+            sender_id=user_id,
+            peer_id=payload.peer_user_id,
+            message_id=message.id,
+        )
     else:
         await db.flush()
 
+    await db.commit()
     return await get_conversation_summary(db, conversation.id, user_id)
 
 
@@ -575,6 +588,7 @@ async def list_messages(
             if message.sender_id != user_id and message.read_at is None:
                 message.read_at = now
         await db.flush()
+        await db.commit()
     return messages, has_more
 
 
@@ -620,6 +634,13 @@ async def send_message(
     if peer_id is not None and not await _is_blocked(db, user_id, peer_id):
         sender = await db.get(User, user_id)
         sender_name = (sender.full_name if sender else None) or "Someone"
+        _queue_message_realtime_events(
+            db,
+            conversation_id=conversation.id,
+            sender_id=user_id,
+            peer_id=peer_id,
+            message_id=message.id,
+        )
         _schedule_after_commit_notify(
             db,
             peer_id=peer_id,
@@ -627,7 +648,36 @@ async def send_message(
             conversation_id=conversation.id,
         )
 
+    await db.commit()
     return message
+
+
+def _queue_message_realtime_events(
+    db: AsyncSession,
+    *,
+    conversation_id: int,
+    sender_id: int,
+    peer_id: int,
+    message_id: int,
+) -> None:
+    payload = {
+        "conversation_id": conversation_id,
+        "message_id": message_id,
+        "sender_id": sender_id,
+    }
+    queue_flatmates_realtime_event(
+        db,
+        user_id=peer_id,
+        event_type=EVENT_NEW_MESSAGE,
+        payload=payload,
+    )
+    for uid in (sender_id, peer_id):
+        queue_flatmates_realtime_event(
+            db,
+            user_id=uid,
+            event_type=EVENT_CONVERSATION_UPDATED,
+            payload={"conversation_id": conversation_id},
+        )
 
 
 def _schedule_after_commit_notify(
@@ -670,6 +720,7 @@ async def mark_conversation_read(
 ) -> dict[str, str]:
     """Mark all peer messages in a conversation as read."""
     await get_conversation(db, conversation_id, user_id)
+    peer_id = await _find_participant_peer_id(db, conversation_id, user_id)
 
     now = datetime.now(timezone.utc)
     await db.execute(
@@ -681,6 +732,13 @@ async def mark_conversation_read(
         )
         .values(read_at=now)
     )
+    for uid in (user_id, peer_id):
+        queue_flatmates_realtime_event(
+            db,
+            user_id=uid,
+            event_type=EVENT_CONVERSATION_UPDATED,
+            payload={"conversation_id": conversation_id},
+        )
     await db.commit()
 
     return {"status": "success"}

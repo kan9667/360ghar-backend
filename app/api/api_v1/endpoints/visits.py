@@ -3,8 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.api_v1.dependencies.auth import get_current_active_user
+from app.api.api_v1.dependencies.auth import (
+    get_current_active_user,
+    get_current_cached_active_user,
+)
 from app.core.database import get_db
+from app.core.db_resilience import raise_read_service_unavailable
 from app.models.enums import UserRole
 from app.models.users import User
 from app.schemas.pagination import CursorPage, CursorParams, build_cursor_page
@@ -16,6 +20,7 @@ from app.schemas.visit import (
     VisitReschedule,
     VisitUpdate,
 )
+from app.services.auth_user_cache import AuthUserSnapshot
 from app.services.pm_authz import can_access_visit
 from app.services.visit import (
     cancel_visit,
@@ -66,50 +71,77 @@ async def schedule_visit(
 @router.get("", response_model=CursorPage[Visit], summary="List my visits")
 async def get_my_visits(
     page: CursorParams = Depends(),
-    current_user: User = Depends(get_current_active_user),
+    current_user: AuthUserSnapshot = Depends(get_current_cached_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List my visits."""
-    rows, next_payload, total = await get_user_visits(
-        db, current_user.id,
-        cursor_payload=page.decoded(), limit=page.limit, with_total=page.include_total,
-    )
-    return build_cursor_page(
-        [Visit.model_validate(r, from_attributes=True) for r in rows],
-        limit=page.limit, next_payload=next_payload, total=total,
-    )
+    try:
+        rows, next_payload, total = await get_user_visits(
+            db, current_user.id,
+            cursor_payload=page.decoded(), limit=page.limit, with_total=page.include_total,
+        )
+        return build_cursor_page(
+            [Visit.model_validate(r, from_attributes=True) for r in rows],
+            limit=page.limit, next_payload=next_payload, total=total,
+        )
+    except Exception as exc:
+        raise_read_service_unavailable(
+            exc,
+            endpoint="visits_list",
+            detail="Visits are temporarily unavailable. Please retry shortly.",
+            extra={"user": current_user.id},
+        )
+        raise
 
 @router.get("/upcoming", response_model=CursorPage[Visit], summary="List upcoming visits")
 async def get_upcoming_visits(
     page: CursorParams = Depends(),
-    current_user: User = Depends(get_current_active_user),
+    current_user: AuthUserSnapshot = Depends(get_current_cached_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List upcoming visits."""
-    rows, next_payload, total = await get_user_upcoming_visits(
-        db, current_user.id,
-        cursor_payload=page.decoded(), limit=page.limit, with_total=page.include_total,
-    )
-    return build_cursor_page(
-        [Visit.model_validate(r, from_attributes=True) for r in rows],
-        limit=page.limit, next_payload=next_payload, total=total,
-    )
+    try:
+        rows, next_payload, total = await get_user_upcoming_visits(
+            db, current_user.id,
+            cursor_payload=page.decoded(), limit=page.limit, with_total=page.include_total,
+        )
+        return build_cursor_page(
+            [Visit.model_validate(r, from_attributes=True) for r in rows],
+            limit=page.limit, next_payload=next_payload, total=total,
+        )
+    except Exception as exc:
+        raise_read_service_unavailable(
+            exc,
+            endpoint="visits_upcoming",
+            detail="Upcoming visits are temporarily unavailable. Please retry shortly.",
+            extra={"user": current_user.id},
+        )
+        raise
 
 @router.get("/past", response_model=CursorPage[Visit], summary="List past visits")
 async def get_past_visits(
     page: CursorParams = Depends(),
-    current_user: User = Depends(get_current_active_user),
+    current_user: AuthUserSnapshot = Depends(get_current_cached_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List past visits."""
-    rows, next_payload, total = await get_user_past_visits(
-        db, current_user.id,
-        cursor_payload=page.decoded(), limit=page.limit, with_total=page.include_total,
-    )
-    return build_cursor_page(
-        [Visit.model_validate(r, from_attributes=True) for r in rows],
-        limit=page.limit, next_payload=next_payload, total=total,
-    )
+    try:
+        rows, next_payload, total = await get_user_past_visits(
+            db, current_user.id,
+            cursor_payload=page.decoded(), limit=page.limit, with_total=page.include_total,
+        )
+        return build_cursor_page(
+            [Visit.model_validate(r, from_attributes=True) for r in rows],
+            limit=page.limit, next_payload=next_payload, total=total,
+        )
+    except Exception as exc:
+        raise_read_service_unavailable(
+            exc,
+            endpoint="visits_past",
+            detail="Past visits are temporarily unavailable. Please retry shortly.",
+            extra={"user": current_user.id},
+        )
+        raise
 
 @router.get("/all", response_model=CursorPage[Visit], summary="List all visits")
 async def list_all_visits(
@@ -118,7 +150,7 @@ async def list_all_visits(
     agent_id: int | None = Query(None, description="Admin only: filter by agent id"),
     property_id: int | None = Query(None),
     user_id: int | None = Query(None),
-    current_user: User = Depends(get_current_active_user),
+    current_user: AuthUserSnapshot = Depends(get_current_cached_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Global visits listing. Admins see all; agents see their managed users/properties."""
@@ -132,25 +164,34 @@ async def list_all_visits(
     else:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    rows, next_payload, total = await get_all_visits(
-        db,
-        cursor_payload=page.decoded(),
-        limit=page.limit,
-        with_total=page.include_total,
-        status=status,
-        filter_agent_id=effective_agent_id,
-        property_id=property_id,
-        user_id=user_id,
-    )
-    return build_cursor_page(
-        [Visit.model_validate(r, from_attributes=True) for r in rows],
-        limit=page.limit, next_payload=next_payload, total=total,
-    )
+    try:
+        rows, next_payload, total = await get_all_visits(
+            db,
+            cursor_payload=page.decoded(),
+            limit=page.limit,
+            with_total=page.include_total,
+            status=status,
+            filter_agent_id=effective_agent_id,
+            property_id=property_id,
+            user_id=user_id,
+        )
+        return build_cursor_page(
+            [Visit.model_validate(r, from_attributes=True) for r in rows],
+            limit=page.limit, next_payload=next_payload, total=total,
+        )
+    except Exception as exc:
+        raise_read_service_unavailable(
+            exc,
+            endpoint="visits_all",
+            detail="Visits are temporarily unavailable. Please retry shortly.",
+            extra={"user": current_user.id},
+        )
+        raise
 
 @router.get("/{visit_id}", response_model=Visit, summary="Get visit details")
 async def get_visit_details(
     visit_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: AuthUserSnapshot = Depends(get_current_cached_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get visit details."""
