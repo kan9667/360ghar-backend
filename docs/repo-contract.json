@@ -7,7 +7,9 @@
     "docs/repo-contract.json",
     "docs/deep-linking.md",
     "docs/deep-linking-deployment-checklist.md",
-    "docs/deep-linking-production-readiness.md"
+    "docs/deep-linking-production-readiness.md",
+    "docs/openapi.json",
+    "docs/flatmates-openapi.yaml"
   ],
   "top_level_paths": [
     "AGENTS.md",
