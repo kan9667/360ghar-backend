@@ -34,6 +34,8 @@ class MaintenanceRequestUpdate(BaseModel):
     completed_at: datetime | None = None
     closed_at: datetime | None = None
     completion_notes: str | None = None
+    vendor_name: str | None = None
+    vendor_contact: str | None = None
 
 
 class MaintenanceRequest(BaseModel):
@@ -58,6 +60,8 @@ class MaintenanceRequest(BaseModel):
     completed_at: datetime | None = None
     closed_at: datetime | None = None
     completion_notes: str | None = None
+    vendor_name: str | None = None
+    vendor_contact: str | None = None
     created_at: datetime
     updated_at: datetime | None = None
 

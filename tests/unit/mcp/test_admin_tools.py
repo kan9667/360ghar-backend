@@ -531,32 +531,37 @@ class TestAgentLeasesTerminate:
         db = AsyncMock()
         agent = make_agent()
         lease = make_lease(lease_id=1, status="active")
-        lease.notes = "Existing notes"  # type: ignore[attr-defined]
-        mock_authz = AsyncMock(return_value=lease)
+        lease.termination_reason = "Existing notes"
+        mock_terminate = AsyncMock(return_value=lease)
         with (
             patch.object(leases_tools, "get_db", return_value=async_gen_db(db)),
             patch.object(leases_tools, "_get_user", new=AsyncMock(return_value=agent)),
             patch.object(leases_tools, "_require_agent_or_admin", return_value=True),
-            patch("app.services.pm_authz.assert_can_access_lease", new=mock_authz),
+            patch("app.services.pm_leases.terminate_lease", new=mock_terminate),
         ):
             result = await leases_tools.agent_leases_terminate(
                 lease_id=1, reason="End of term"
             )
         assert result["ok"] is True
         assert result["data"]["lease_id"] == 1
-        db.flush.assert_awaited()
+        assert "termination_date" in result["data"]
+        mock_terminate.assert_awaited_once()
+        terminate_kwargs = mock_terminate.await_args.kwargs
+        assert terminate_kwargs["lease_id"] == 1
+        assert terminate_kwargs["reason"] == "End of term"
+        assert terminate_kwargs["termination_date"] is not None
         db.commit.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_nonexistent_lease(self) -> None:
         db = AsyncMock()
         agent = make_agent()
-        mock_authz = AsyncMock(side_effect=NotFoundException("Lease not found"))
+        mock_terminate = AsyncMock(side_effect=NotFoundException("Lease not found"))
         with (
             patch.object(leases_tools, "get_db", return_value=async_gen_db(db)),
             patch.object(leases_tools, "_get_user", new=AsyncMock(return_value=agent)),
             patch.object(leases_tools, "_require_agent_or_admin", return_value=True),
-            patch("app.services.pm_authz.assert_can_access_lease", new=mock_authz),
+            patch("app.services.pm_leases.terminate_lease", new=mock_terminate),
         ):
             result = await leases_tools.agent_leases_terminate(
                 lease_id=999, reason="End of term"

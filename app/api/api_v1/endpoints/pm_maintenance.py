@@ -127,6 +127,8 @@ async def update_request(
         completed_at=payload.completed_at,
         closed_at=payload.closed_at,
         completion_notes=payload.completion_notes,
+        vendor_name=payload.vendor_name,
+        vendor_contact=payload.vendor_contact,
     )
     return MaintenanceRequestSchema.model_validate(req)
 

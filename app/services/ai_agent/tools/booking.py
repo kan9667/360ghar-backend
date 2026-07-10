@@ -34,6 +34,7 @@ async def bookings_check_availability(
     from app.services import booking as booking_svc
 
     db = ctx.deps.db
+    assert db is not None
     result = await booking_svc.check_availability(db, property_id, check_in_date,
                                                    check_out_date, guests)
     return {
@@ -54,6 +55,7 @@ async def bookings_get_pricing(
     from app.services import booking as booking_svc
 
     db = ctx.deps.db
+    assert db is not None
     check_in = datetime.fromisoformat(check_in_date)
     check_out = datetime.fromisoformat(check_out_date)
     pricing = await booking_svc.calculate_pricing(db, property_id, check_in, check_out, guests)
@@ -75,6 +77,7 @@ async def bookings_create(
     from app.services import booking as booking_svc
 
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     check_in = datetime.fromisoformat(check_in_date)
     check_out = datetime.fromisoformat(check_out_date)
     if check_out <= check_in:
@@ -108,6 +111,7 @@ async def bookings_list(
     from app.services import booking as booking_svc
 
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     limit = min(max(1, limit), 100)
     rows, _next, _total = await booking_svc.get_user_bookings(db, user.id, cursor_payload={}, limit=limit)
     bookings = rows
@@ -130,6 +134,7 @@ async def bookings_get(
     from app.services import booking as booking_svc
 
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     booking = await booking_svc.get_booking(db, booking_id)
     if not booking:
         return {"error": True, "message": f"Booking {booking_id} not found."}
@@ -154,6 +159,7 @@ async def bookings_cancel(
     from app.services import booking as booking_svc
 
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     booking = await booking_svc.get_booking(db, booking_id)
     if not booking:
         return {"error": True, "message": f"Booking {booking_id} not found."}
@@ -202,6 +208,7 @@ async def agent_bookings_list_all(
     from app.models.properties import Property
 
     db = ctx.deps.db
+    assert db is not None
     limit = min(max(1, limit), 100)
     stmt = select(Booking)
     if owner_id:
@@ -227,6 +234,7 @@ async def agent_bookings_update_status(
     from app.models.bookings import Booking
 
     db = ctx.deps.db
+    assert db is not None
     valid = ("confirmed", "checked_in", "checked_out", "cancelled", "completed")
     if status not in valid:
         return {"error": True, "message": f"Invalid status. Valid: {valid}"}

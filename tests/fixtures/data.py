@@ -717,7 +717,7 @@ async def test_maintenance_requests(
     requests = []
     categories = [
         (MaintenanceCategory.plumbing, MaintenanceUrgency.medium, "Leaky faucet", MaintenanceRequestStatus.open),
-        (MaintenanceCategory.electrical, MaintenanceUrgency.high, "Broken socket", MaintenanceRequestStatus.in_progress),
+        (MaintenanceCategory.electrical, MaintenanceUrgency.high, "Broken socket", MaintenanceRequestStatus.in_review),
         (MaintenanceCategory.hvac, MaintenanceUrgency.low, "AC servicing", MaintenanceRequestStatus.resolved),
     ]
 

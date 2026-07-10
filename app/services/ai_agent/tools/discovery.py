@@ -35,6 +35,9 @@ async def guest_property_search(
     from app.schemas.property import UnifiedPropertyFilter
     from app.services.property import get_unified_properties_optimized
 
+    db = ctx.deps.db
+    assert db is not None
+
     limit = min(max(1, limit), 50)
     page = max(1, page)
 
@@ -60,7 +63,7 @@ async def guest_property_search(
 
     filters = UnifiedPropertyFilter(**filter_data)
     rows, _next, total_count = await get_unified_properties_optimized(
-        ctx.deps.db,
+        db,
         filters=filters,
         user_id=None,
         cursor_payload={},
@@ -82,7 +85,10 @@ async def guest_property_details(
     """Get full details for a specific property. No authentication required."""
     from app.services.property import get_property
 
-    property_obj = await get_property(ctx.deps.db, property_id)
+    db = ctx.deps.db
+    assert db is not None
+
+    property_obj = await get_property(db, property_id)
     return {"property": dict(serialize_property_full(property_obj))}  # type: ignore[arg-type]
 
 
@@ -96,6 +102,9 @@ async def guest_property_recommendations(
     from app.schemas.property import UnifiedPropertyFilter
     from app.services.property import get_unified_properties_optimized
 
+    db = ctx.deps.db
+    assert db is not None
+
     limit = min(max(1, limit), 20)
 
     filter_data: dict[str, Any] = {}
@@ -106,7 +115,7 @@ async def guest_property_recommendations(
 
     filters = UnifiedPropertyFilter(**filter_data)
     rows, _next, _total = await get_unified_properties_optimized(
-        ctx.deps.db,
+        db,
         filters=filters,
         user_id=None,
         cursor_payload={},

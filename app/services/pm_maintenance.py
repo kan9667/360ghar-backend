@@ -156,6 +156,8 @@ async def update_maintenance_request(
     completed_at: datetime | None = None,
     closed_at: datetime | None = None,
     completion_notes: str | None = None,
+    vendor_name: str | None = None,
+    vendor_contact: str | None = None,
 ) -> MaintenanceRequest:
     req = await db.get(MaintenanceRequest, request_id)
     if not req:
@@ -230,6 +232,10 @@ async def update_maintenance_request(
         req.closed_at = closed_at
     if completion_notes is not None:
         req.completion_notes = completion_notes
+    if vendor_name is not None:
+        req.vendor_name = vendor_name
+    if vendor_contact is not None:
+        req.vendor_contact = vendor_contact
 
     await db.flush()
     await db.refresh(req)

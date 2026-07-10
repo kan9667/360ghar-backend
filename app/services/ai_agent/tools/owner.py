@@ -44,6 +44,7 @@ async def owner_properties_list(
 
     limit = min(max(1, limit), 100)
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     actor = _user_schema(user)
 
     properties, _next, _total = await list_managed_properties(
@@ -130,6 +131,7 @@ async def owner_properties_create(
     from app.services.pm_properties import create_managed_property
 
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     prop_type = PropertyType(property_type.lower())
     prop_purpose = PropertyPurpose(purpose.lower())
 
@@ -166,6 +168,7 @@ async def owner_properties_get(
     from app.services.pm_properties import get_managed_property_detail
 
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     result = await get_managed_property_detail(db, actor=_user_schema(user),
                                                property_id=property_id)
     prop = result["property"]
@@ -192,6 +195,7 @@ async def owner_properties_update(
     from app.services.pm_authz import assert_can_access_property
 
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     prop = await assert_can_access_property(db, actor=_user_schema(user),
                                             property_id=property_id)
 
@@ -222,6 +226,7 @@ async def owner_properties_toggle_availability(
     from app.services.pm_authz import assert_can_access_property
 
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     prop = await assert_can_access_property(db, actor=_user_schema(user),
                                             property_id=property_id)
     prop.is_available = is_available
@@ -247,6 +252,7 @@ async def agent_properties_list(
     from app.services.pm_properties import list_managed_properties
 
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     limit = min(max(1, limit), 100)
     actor = _user_schema(user)
     properties, _next, _total = await list_managed_properties(
@@ -265,6 +271,7 @@ async def agent_properties_get(
     from app.services.pm_properties import get_managed_property_detail
 
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     result = await get_managed_property_detail(db, actor=_user_schema(user),
                                                property_id=property_id)
     prop = result["property"]
@@ -299,6 +306,7 @@ async def agent_properties_create_for_owner(
     from app.services.pm_properties import create_managed_property
 
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     data = PropertyCreate(
         title=title, description=description,
         property_type=PropertyType(property_type.lower()),
@@ -324,6 +332,7 @@ async def agent_properties_verify(
     from app.services.pm_authz import assert_can_access_property
 
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     prop = await assert_can_access_property(db, actor=_user_schema(user),
                                             property_id=property_id)
     preferences = dict(prop.listing_preferences or {})
@@ -356,6 +365,7 @@ async def agent_leases_list(
     from app.models.pm_leases import Lease
 
     db = ctx.deps.db
+    assert db is not None
     limit = min(max(1, limit), 100)
     stmt = select(Lease)
     if owner_id:
@@ -389,6 +399,7 @@ async def agent_leases_create(
     from app.services.user import get_user_by_id
 
     db, _user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     prop = (await db.execute(
         select(Property).where(Property.id == property_id)
     )).scalar_one_or_none()
@@ -422,22 +433,49 @@ async def agent_leases_terminate(
     termination_date: str | None = None,
 ) -> dict[str, Any]:
     """Terminate an active lease."""
-    from app.models.enums import LeaseStatus
-    from app.models.pm_leases import Lease
+    from app.core.exceptions import (
+        BadRequestException,
+        InsufficientPermissionsError,
+        NotFoundException,
+    )
+    from app.core.utils import utc_now
+    from app.services.pm_leases import terminate_lease
 
-    db = ctx.deps.db
-    lease = (await db.execute(
-        select(Lease).where(Lease.id == lease_id)
-    )).scalar_one_or_none()
-    if not lease:
+    db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
+
+    term_date = utc_now().date()
+    if termination_date:
+        try:
+            term_date = datetime.fromisoformat(termination_date).date()
+        except ValueError:
+            return {
+                "error": True,
+                "message": "termination_date must be in ISO-8601 format",
+            }
+
+    try:
+        await terminate_lease(
+            db,
+            actor=_user_schema(user),
+            lease_id=lease_id,
+            termination_date=term_date,
+            reason=reason,
+        )
+        await db.commit()
+    except NotFoundException:
         return {"error": True, "message": f"Lease {lease_id} not found"}
+    except InsufficientPermissionsError:
+        return {"error": True, "message": "You do not have access to this lease"}
+    except BadRequestException as e:
+        detail = e.detail if hasattr(e, "detail") else str(e)
+        return {"error": True, "message": str(detail)}
 
-    lease.status = LeaseStatus.terminated
-    existing_notes = lease.notes or ""  # type: ignore[attr-defined]
-    lease.notes = f"{existing_notes}\n[Terminated] {reason}".strip()  # type: ignore[attr-defined]
-    await db.flush()
-    await db.commit()
-    return {"message": "Lease terminated", "lease_id": lease_id}
+    return {
+        "message": "Lease terminated",
+        "lease_id": lease_id,
+        "termination_date": term_date.isoformat(),
+    }
 
 
 # ============================================================================
@@ -457,6 +495,7 @@ async def agent_rent_list_due(
     from app.models.pm_leases import Lease
 
     db = ctx.deps.db
+    assert db is not None
     limit = min(max(1, limit), 100)
     stmt = select(Lease).where(Lease.status == LeaseStatus.active)
     if owner_id:
@@ -501,6 +540,7 @@ async def agent_rent_record_payment(
     from app.models.pm_leases import Lease
 
     db = ctx.deps.db
+    assert db is not None
     valid_methods = ("cash", "bank_transfer", "upi", "cheque", "online", "other")
     if payment_method not in valid_methods:
         return {"error": True, "message": f"Invalid payment method. Valid: {valid_methods}"}
@@ -539,6 +579,7 @@ async def agent_maintenance_list(
     from app.models.properties import Property
 
     db = ctx.deps.db
+    assert db is not None
     limit = min(max(1, limit), 100)
     stmt = select(MaintenanceRequest)
     if owner_id:
@@ -569,6 +610,7 @@ async def agent_maintenance_update_status(
     from app.models.pm_maintenance import MaintenanceRequest
 
     db = ctx.deps.db
+    assert db is not None
     req = (await db.execute(
         select(MaintenanceRequest).where(MaintenanceRequest.id == request_id)
     )).scalar_one_or_none()
@@ -589,9 +631,9 @@ async def agent_maintenance_update_status(
         req.work_order_status = WorkOrderStatus.cancelled
 
     if vendor_name:
-        req.vendor_name = vendor_name  # type: ignore[attr-defined]
+        req.vendor_name = vendor_name
     if vendor_contact:
-        req.vendor_contact = vendor_contact  # type: ignore[attr-defined]
+        req.vendor_contact = vendor_contact
     if estimated_cost is not None:
         req.estimated_cost = estimated_cost
     if actual_cost is not None:
@@ -619,6 +661,7 @@ async def agent_dashboard_overview(
     from app.models.properties import Property
 
     db = ctx.deps.db
+    assert db is not None
     prop_filter = select(Property.id)
     if owner_id:
         prop_filter = prop_filter.where(Property.owner_id == owner_id)

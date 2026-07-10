@@ -731,49 +731,53 @@ class StorageService:
             else:
                 id_inputs.append(item)
 
-        stmt = select(MediaFile).where(
-            MediaFile.user_id == actor.id,
-            or_(
-                MediaFile.id.in_(id_inputs) if id_inputs else False,
-                MediaFile.file_url.in_(url_inputs) if url_inputs else False,
-            ),
-        )
-        result = await db.execute(stmt)
+        or_conditions: list[Any] = []
+        if id_inputs:
+            or_conditions.append(MediaFile.id.in_(id_inputs))
+        if url_inputs:
+            or_conditions.append(MediaFile.file_url.in_(url_inputs))
+
         by_id: dict[str, MediaFile] = {}
         by_url: dict[str, MediaFile] = {}
-        for media in result.scalars().all():
-            by_id[media.id] = media
-            if media.file_url:
-                by_url[media.file_url] = media
+        if or_conditions:
+            stmt = select(MediaFile).where(
+                MediaFile.user_id == actor.id,
+                or_(*or_conditions),
+            )
+            result = await db.execute(stmt)
+            for media in result.scalars().all():
+                by_id[media.id] = media
+                if media.file_url:
+                    by_url[media.file_url] = media
 
         deleted_media: set[str] = set()
         for item in unique_inputs:
             # Prefer URL lookup when the request string is a URL; otherwise id.
-            media = by_url.get(item) or by_id.get(item)
-            if media is None:
+            found: MediaFile | None = by_url.get(item) or by_id.get(item)
+            if found is None:
                 failed.append(item)
                 continue
-            if media.id in deleted_media:
+            if found.id in deleted_media:
                 # Same media was referenced twice (once by id and once by URL).
                 # Echo the original request identifier for client correlation.
                 deleted.append(item)
                 continue
-            deleted_media.add(media.id)
+            deleted_media.add(found.id)
 
-            file_path: str | None = media.storage_path
-            if not file_path and media.filename:
+            file_path: str | None = found.storage_path
+            if not file_path and found.filename:
                 file_path = (
-                    f"{media.folder}/{media.filename}" if media.folder else media.filename
+                    f"{found.folder}/{found.filename}" if found.folder else found.filename
                 )
             if file_path:
-                bucket_name = media.bucket_name if media.bucket_name else None
+                bucket_name = found.bucket_name if found.bucket_name else None
                 try:
                     self.delete_file(file_path, bucket_name=bucket_name)
                 except Exception as e:  # noqa: BLE001
-                    logger.error("Storage deletion failed for media %s: %s", media.id, e)
-                    storage_warnings.append(media.id)
-            await db.delete(media)
-            # Always echo the original request item (id or URL), not media.id.
+                    logger.error("Storage deletion failed for media %s: %s", found.id, e)
+                    storage_warnings.append(found.id)
+            await db.delete(found)
+            # Always echo the original request item (id or URL), not found.id.
             deleted.append(item)
 
         await db.flush()

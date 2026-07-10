@@ -8,6 +8,7 @@ import threading
 import time
 import uuid as _uuid
 from collections import defaultdict
+from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from sqlalchemy import and_, func, select, update
@@ -36,7 +37,7 @@ _reaper_lock = threading.Lock()
 def _is_ip_rate_limited(
     client_ip: str,
     *,
-    store: dict[str, list[float]],
+    store: dict[str, Any],
     limit: int,
     window_s: int,
     last_reap_attr: str,
@@ -75,13 +76,13 @@ def _is_ip_rate_limited(
 
 
 # Per-IP limiter state for like/unlike endpoints.
-_like_store: dict[str, list[float]] = defaultdict(list)
+_like_store: dict[str, Any] = defaultdict(list)
 _LIKE_RATE_LIMIT = 10  # max requests
 _LIKE_RATE_WINDOW_S = 60  # per window
 
 
 # Per-IP limiter state for analytics event endpoints.
-_event_store: dict[str, list[float]] = defaultdict(list)
+_event_store: dict[str, Any] = defaultdict(list)
 _EVENT_RATE_LIMIT = 120  # max requests per window (generous for heatmap pings)
 _EVENT_RATE_WINDOW_S = 60
 

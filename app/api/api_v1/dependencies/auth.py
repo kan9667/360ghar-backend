@@ -4,7 +4,6 @@ import sentry_sdk
 from fastapi import Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.core.auth import AuthFailureReason, _is_failure, verify_supabase_token
 from app.core.database import get_bg_session_factory, get_db
 from app.core.db_resilience import (

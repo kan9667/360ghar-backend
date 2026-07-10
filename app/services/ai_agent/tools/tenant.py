@@ -31,6 +31,7 @@ async def tenant_lease_current(
     from app.models.properties import Property
 
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     stmt = (
         select(Lease)
         .where(Lease.tenant_user_id == user.id, Lease.status == LeaseStatus.active)
@@ -62,6 +63,7 @@ async def tenant_rent_history(
 
     limit = min(max(1, limit), 100)
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
 
     lease_ids = [
         r[0] for r in (await db.execute(
@@ -116,6 +118,7 @@ async def tenant_maintenance_create(
     from app.models.pm_maintenance import MaintenanceRequest
 
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
     cat = MaintenanceCategory(category.lower())
     urgency_map = {
         "low": MaintenanceUrgency.low, "medium": MaintenanceUrgency.medium,
@@ -161,6 +164,7 @@ async def tenant_maintenance_list(
 
     limit = min(max(1, limit), 100)
     db, user = ctx.deps.db, ctx.deps.user
+    assert db is not None
 
     stmt = select(MaintenanceRequest).where(MaintenanceRequest.tenant_user_id == user.id)
     if status:

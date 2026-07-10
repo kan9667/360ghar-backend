@@ -251,6 +251,10 @@ async def agent_maintenance_update_status(
                 request.estimated_cost = estimated_cost
             if actual_cost is not None:
                 request.actual_cost = actual_cost
+            if vendor_name:
+                request.vendor_name = vendor_name
+            if vendor_contact:
+                request.vendor_contact = vendor_contact
 
             if status_norm == "open":
                 request.request_status = MaintenanceRequestStatus.open

@@ -45,8 +45,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.logging import get_logger
 from app.mcp.chatgpt import get_widget_name_for_tool
-from app.services.ai_agent.system_prompt import get_system_prompt
 from app.services.ai_agent.deps import AgentDeps, run_with_short_db_session
+from app.services.ai_agent.system_prompt import get_system_prompt
 from app.services.ai_agent.tools import get_tools_for_role
 
 logger = get_logger(__name__)

@@ -1,5 +1,6 @@
 from io import BytesIO
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import UploadFile
@@ -140,3 +141,42 @@ class TestStorageServiceErrors:
 
     def test_storage_service_does_not_expose_noop_list_files(self):
         assert not hasattr(StorageService, "list_files")
+
+
+class TestStorageDeleteBatch:
+    """Regression tests for bulk media delete path."""
+
+    @pytest.mark.asyncio
+    async def test_delete_batch_by_id_and_url_uses_found_media(self):
+        """Successful match must not raise NameError from incomplete rename."""
+        service = StorageService()
+        service.delete_file = MagicMock()
+
+        media = SimpleNamespace(
+            id="media-1",
+            file_url="https://cdn.example.com/a.jpg",
+            storage_path="folder/a.jpg",
+            filename="a.jpg",
+            folder="folder",
+            bucket_name="media",
+        )
+        result_proxy = MagicMock()
+        result_proxy.scalars.return_value.all.return_value = [media]
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=result_proxy)
+        db.delete = AsyncMock()
+        db.flush = AsyncMock()
+        actor = SimpleNamespace(id=42)
+
+        result = await service.delete_batch(
+            db,
+            media_ids=["media-1", "https://cdn.example.com/a.jpg", "missing-id"],
+            actor=actor,
+        )
+
+        assert result["deleted"] == ["media-1", "https://cdn.example.com/a.jpg"]
+        assert result["failed"] == ["missing-id"]
+        assert result["storage_warnings"] == []
+        service.delete_file.assert_called_once_with("folder/a.jpg", bucket_name="media")
+        db.delete.assert_awaited_once_with(media)
+        db.flush.assert_awaited_once()

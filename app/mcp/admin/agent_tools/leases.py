@@ -291,7 +291,8 @@ async def agent_leases_terminate(
         termination_date: Termination date (ISO-8601, defaults to today)
     """
     try:
-        from app.models.enums import LeaseStatus
+        from app.schemas.user import User as UserSchema
+        from app.services.pm_leases import terminate_lease
 
         term_date = utc_now().date()
         if termination_date:
@@ -315,14 +316,15 @@ async def agent_leases_terminate(
                     "This endpoint is for agents and admins only"
                 ).model_dump()
 
-            from app.schemas.user import User as UserSchema
-            from app.services.pm_authz import assert_can_access_lease
-
             user_schema = UserSchema.model_validate(user)
 
             try:
-                lease = await assert_can_access_lease(
-                    db, actor=user_schema, lease_id=lease_id
+                await terminate_lease(
+                    db,
+                    actor=user_schema,
+                    lease_id=lease_id,
+                    termination_date=term_date,
+                    reason=reason,
                 )
             except NotFoundException:
                 return not_found_response("Lease", lease_id)
@@ -331,18 +333,12 @@ async def agent_leases_terminate(
                     MCPErrorCode.INSUFFICIENT_PERMISSIONS,
                     "You do not have access to this lease"
                 ).model_dump()
-
-            if lease.status != LeaseStatus.active:
+            except BadRequestException as e:
                 return MCPResponse.failure(
                     MCPErrorCode.OPERATION_FAILED,
-                    f"Lease cannot be terminated (status: {lease.status.value})"
+                    str(e.detail) if hasattr(e, "detail") else str(e),
                 ).model_dump()
 
-            lease.status = LeaseStatus.terminated
-            lease.end_date = term_date
-            lease.notes = f"{lease.notes or ''}\nTerminated: {reason}".strip()  # type: ignore[attr-defined]
-
-            await db.flush()
             await db.commit()
 
             return MCPResponse.success({
