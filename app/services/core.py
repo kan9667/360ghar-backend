@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import NotFoundException, ValidationException
+from app.core.logging import get_logger
 from app.core.utils import utc_now
 from app.models.core import FAQ, AppVersion, BugReport, Page
 from app.models.enums import BugStatus, BugType
@@ -32,6 +33,8 @@ from app.schemas.pagination import (
     offset_payload,
     read_offset,
 )
+
+logger = get_logger(__name__)
 
 
 class CoreService:
@@ -164,7 +167,7 @@ class CoreService:
         return PageResponse.model_validate(page)
 
     async def get_page_by_unique_name(self, unique_name: str) -> PageResponse | None:
-        """Get a page by its unique name"""
+        """Get a page by its unique name. Pure read; does NOT modify view_count."""
         query = select(Page).options(
             selectinload(Page.creator),
             selectinload(Page.updater)
@@ -174,18 +177,30 @@ class CoreService:
 
         result = await self.db.execute(query)
         page = result.scalar_one_or_none()
-
         if page:
-            # Increment view count
-            page.view_count += 1
-            await self.db.commit()
-            await self.db.refresh(page)
-
             return PageResponse.model_validate(page)
         return None
 
+    async def _increment_page_view_count(self, page: Page) -> None:
+        """Best-effort view count increment. Raises on DB errors so caller can decide.
+
+        Uses a Core UPDATE (not ORM mutation) so a cosmetic view-count bump does
+        not bump the page's updated_at. The Page object is then refreshed.
+        """
+        await self.db.execute(
+            update(Page)
+            .where(Page.id == page.id)
+            .values(
+                view_count=Page.view_count + 1,
+                # Preserve updated_at: a view is not a content update.
+                updated_at=Page.updated_at,
+            )
+        )
+        await self.db.commit()
+        await self.db.refresh(page)
+
     async def get_page_public(self, unique_name: str) -> PagePublicResponse | None:
-        """Get a page for public access (without sensitive data)"""
+        """Get a page for public access (without sensitive data)."""
         query = select(Page).where(
             and_(
                 Page.unique_name == unique_name,
@@ -199,12 +214,23 @@ class CoreService:
         page = result.scalar_one_or_none()
 
         if page:
-            # Increment view count
-            page.view_count += 1
-            await self.db.commit()
-            await self.db.refresh(page)
+            # Snapshot the response before the best-effort view count increment.
+            # If the increment's commit fails (e.g., read-only transaction), the
+            # response still reflects the persisted page and is not invalidated
+            # by the rolled-back, possibly expired ORM instance.
+            response = PagePublicResponse.model_validate(page)
+            try:
+                await self._increment_page_view_count(page)
+                # Re-validate with the refreshed page to include the updated count.
+                response = PagePublicResponse.model_validate(page)
+            except Exception as view_exc:  # noqa: BLE001
+                logger.warning("View count increment failed for %s: %s", unique_name, view_exc)
+                try:
+                    await self.db.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
 
-            return PagePublicResponse.model_validate(page)
+            return response
         return None
 
     async def get_pages(
@@ -268,6 +294,9 @@ class CoreService:
 
         if updated_by:
             update_dict['updated_by'] = updated_by
+
+        # updated_at onupdate only fires for ORM flushes; this is a Core UPDATE.
+        update_dict['updated_at'] = utc_now()
 
         # Update the page
         query = (

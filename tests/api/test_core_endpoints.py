@@ -2,15 +2,18 @@
 Tests for core endpoints (health, config, etc.).
 """
 
+import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ServiceUnavailableException
-from app.models.enums import BugSeverity, BugStatus, BugType
+from app.models.core import Page
+from app.models.enums import BugSeverity, BugStatus, BugType, PageFormat
 from app.schemas.core import AppVersionCheckRequest, BugReportResponse
 
 
@@ -270,3 +273,35 @@ class TestBugEndpoints:
             assert bug_data.device_info == {"os": "iOS"}
             assert bug_data.tags == ["ui", "mobile"]
             assert bug_data.media_urls == ["https://cdn.example.com/uploads/bug.png"]
+
+
+class TestPageEndpoints:
+    """Smoke tests for the page endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_get_public_page_increments_view_count(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Public page access should increment view_count and return 200."""
+        unique_name = f"smoke-public-page-{uuid.uuid4().hex[:8]}"
+        page = Page(
+            unique_name=unique_name,
+            title="Smoke Test Page",
+            content="<p>Hello</p>",
+            format=PageFormat.html,
+            is_active=True,
+            is_draft=False,
+            is_private=False,
+            view_count=0,
+        )
+        db_session.add(page)
+        await db_session.commit()
+        await db_session.refresh(page)
+
+        response = await client.get(f"/api/v1/pages/{unique_name}/public")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["unique_name"] == unique_name
+        assert data["title"] == "Smoke Test Page"
+        assert data["view_count"] == 1
