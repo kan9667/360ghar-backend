@@ -7,6 +7,7 @@ import sentry_sdk
 import sentry_sdk.integrations.fastapi
 import yaml  # type: ignore[import-untyped]
 from dotenv import load_dotenv
+from fastapi import Request
 from fastapi.responses import Response
 from sentry_sdk.integrations.logging import LoggingIntegration
 from sqlalchemy import text
@@ -91,10 +92,18 @@ async def root():
 
 
 @app.get("/health")
-async def health_check():
-    """Liveness check that does not touch downstream dependencies."""
+async def health_check(request: Request):
+    """Liveness check that does not touch downstream dependencies.
+
+    Always returns HTTP 200 so Railway healthchecks do not restart-loop on
+    transient database/pooler pressure. When required startup degraded (e.g.
+    Supavisor ECHECKOUTTIMEOUT), ``status`` is ``degraded`` but the process
+    remains reachable. Use ``/ready`` for true DB readiness.
+    """
+    startup_degraded = bool(getattr(request.app.state, "startup_degraded", False))
     return {
-        "status": "healthy",
+        "status": "degraded" if startup_degraded else "healthy",
+        "startup_degraded": startup_degraded,
         "timestamp": utc_now_iso(),
         "version": settings.APP_VERSION,
     }

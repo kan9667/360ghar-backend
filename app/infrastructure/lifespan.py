@@ -9,11 +9,11 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
-from sqlalchemy import text
 
 from app.config import settings
 from app.core.cache import initialize_cache, shutdown_cache
 from app.core.database import bg_engine, engine, mark_engines_disposing
+from app.core.db_resilience import extract_db_error_code, is_transient_db_error
 from app.core.http import close_all_clients as close_all_http_clients
 from app.core.logging import get_logger
 from app.infrastructure.scheduler import shutdown_scheduler, start_scheduler
@@ -21,6 +21,15 @@ from app.infrastructure.scheduler import shutdown_scheduler, start_scheduler
 logger = get_logger(__name__)
 
 LifespanFactory = Callable[[FastAPI], Any]
+
+# Readiness probe budget: short per-attempt caps so Supavisor's 60s
+# ECHECKOUTTIMEOUT cannot burn Railway's healthcheck window. Total wait is
+# well under the default 5m healthcheck while still surviving brief pooler
+# blips during cold start / rolling deploy.
+_DB_READINESS_MAX_ATTEMPTS = 12
+_DB_READINESS_ATTEMPT_TIMEOUT_S = 8.0
+_DB_READINESS_CONNECT_TIMEOUT_S = 5
+_DB_READINESS_MAX_SLEEP_S = 8.0
 
 
 def create_lifespan(testing: bool, user_mcp_app: Any, admin_mcp_app: Any) -> LifespanFactory:
@@ -86,27 +95,43 @@ def _strict_required_startup() -> bool:
 
 
 async def _run_required_startup(app: FastAPI) -> None:
-    """Run startup phases required for serving production traffic."""
-    strict = _strict_required_startup()
-    for phase, startup_step in (
-        ("database_readiness", _verify_database_ready),
-        ("startup_migrations", _apply_pending_migrations),
-    ):
-        try:
-            await startup_step()
-        except Exception as exc:
-            if strict:
-                logger.error("Required startup phase failed (%s): %s", phase, exc)
-                raise
-            _record_startup_degradation(app, phase, exc)
+    """Run startup phases required for serving production traffic.
+
+    Database readiness is required for *correct* traffic, but transient
+    Supavisor/PgBouncer pressure (ECHECKOUTTIMEOUT, EDBHANDLEREXITED) must not
+    abort the process: Railway's ``/health`` liveness probe never becomes
+    reachable if lifespan raises, which turns a brief pooler blip into a
+    deploy failure + restart storm that worsens pool saturation.
+
+    Non-transient failures (auth, bad host, invalid URL) still abort production
+    so misconfiguration is not silently served.
+    """
+    try:
+        await _verify_database_ready()
+    except Exception as exc:
+        if _strict_required_startup() and not _is_transient_readiness_failure(exc):
+            logger.error("Required startup phase failed (database_readiness): %s", exc)
+            raise
+        _record_startup_degradation(app, "database_readiness", exc)
 
 
 async def _run_optional_startup(app: FastAPI) -> None:
     """Run best-effort startup phases that can degrade without aborting."""
-    startup_steps = (
-        ("cache", _initialize_cache),
-        ("supabase_dns_prewarm", _prewarm_supabase_dns),
-        ("scheduler", lambda: _start_scheduler_jobs(app)),
+    # Skip DDL when readiness already failed — SQLAlchemy first-connect can still
+    # wait the full Supavisor 60s ECHECKOUTTIMEOUT and burn the healthcheck window.
+    db_ready = not any(
+        err.get("phase") == "database_readiness" for err in app.state.startup_errors
+    )
+    startup_steps: list[tuple[str, Callable[[], Any]]] = []
+    if db_ready:
+        startup_steps.append(("startup_migrations", _apply_pending_migrations))
+    startup_steps.extend(
+        (
+            ("cache", _initialize_cache),
+            ("supabase_dns_prewarm", _prewarm_supabase_dns),
+            # _start_scheduler_jobs is async; calling it returns an awaitable.
+            ("scheduler", lambda: _start_scheduler_jobs(app)),
+        )
     )
     for phase, startup_step in startup_steps:
         try:
@@ -236,38 +261,109 @@ def _validate_deeplink_config() -> None:
     validate_deeplink_config()
 
 
+def _is_transient_readiness_failure(exc: BaseException) -> bool:
+    """True when readiness failed due to pooler pressure or a short client timeout.
+
+    Walks ``__cause__`` / ``__context__`` so a wrapping ``RuntimeError`` still
+    classifies as transient when the root is ECHECKOUTTIMEOUT / EDBHANDLEREXITED.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, (TimeoutError, asyncio.TimeoutError)):
+            return True
+        if isinstance(current, Exception) and is_transient_db_error(current):
+            return True
+        message = str(current)
+        if extract_db_error_code(Exception(message)):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+async def _raw_database_probe() -> None:
+    """Open a short-lived psycopg connection and run ``SELECT 1``.
+
+    Uses raw psycopg (not SQLAlchemy ``engine.connect()``) so ``asyncio.wait_for``
+    can actually cancel a hung Supavisor handshake. SQLAlchemy's greenlet path
+    was observed waiting the full Supavisor 60s ECHECKOUTTIMEOUT despite an
+    outer ``asyncio.timeout(5)``, which burned Railway's healthcheck window.
+    """
+    import psycopg
+
+    conninfo = settings.ASYNC_DATABASE_URL.replace(
+        "postgresql+psycopg://", "postgresql://", 1
+    )
+    async with await psycopg.AsyncConnection.connect(
+        conninfo,
+        connect_timeout=_DB_READINESS_CONNECT_TIMEOUT_S,
+        prepare_threshold=None,
+        application_name="360ghar_readiness",
+    ) as conn:
+        await conn.execute("SELECT 1")
+
+
 async def _verify_database_ready() -> None:
     """Probe the database before accepting requests.
 
-    Ensures the connection pool can check out a connection and execute a
-    simple query. Raises after retries so the required-startup wrapper can
-    either abort production startup or record degraded non-production startup.
+    Retries with a short per-attempt timeout so transient Supavisor pressure
+    does not monopolize startup. Non-transient failures (auth, bad host) fail
+    immediately without burning the retry budget. Raises after the budget is
+    exhausted; the required-startup wrapper degrades on transient failures
+    instead of aborting production (which would make ``/health`` unreachable).
     """
-    max_attempts = 3
-    for attempt in range(1, max_attempts + 1):
+    last_exc: Exception | None = None
+    for attempt in range(1, _DB_READINESS_MAX_ATTEMPTS + 1):
         try:
-            async with asyncio.timeout(5):
-                async with engine.connect() as conn:
-                    await conn.execute(text("SELECT 1"))
+            await asyncio.wait_for(
+                _raw_database_probe(),
+                timeout=_DB_READINESS_ATTEMPT_TIMEOUT_S,
+            )
             logger.info("Database readiness check passed (attempt %d)", attempt)
             return
         except Exception as exc:
-            if attempt < max_attempts:
-                logger.warning(
-                    "Database readiness check failed (attempt %d/%d): %s",
+            last_exc = exc
+            error_code = extract_db_error_code(exc) or type(exc).__name__
+            transient = _is_transient_readiness_failure(exc)
+
+            # Auth/config errors will not recover by waiting — fail fast.
+            if not transient:
+                logger.error(
+                    "Database readiness check failed with non-transient error "
+                    "(attempt %d, code=%s): %s",
                     attempt,
-                    max_attempts,
+                    error_code,
                     exc,
                 )
-                await asyncio.sleep(1.0 * attempt)
+                raise RuntimeError(
+                    f"Database readiness check failed: {exc}"
+                ) from exc
+
+            if attempt < _DB_READINESS_MAX_ATTEMPTS:
+                sleep_s = min(1.0 * attempt, _DB_READINESS_MAX_SLEEP_S)
+                logger.warning(
+                    "Database readiness check failed (attempt %d/%d, code=%s): %s",
+                    attempt,
+                    _DB_READINESS_MAX_ATTEMPTS,
+                    error_code,
+                    exc,
+                )
+                await asyncio.sleep(sleep_s)
             else:
                 logger.error(
-                    "Database readiness check failed after %d attempts: %s. "
-                    "Startup cannot be marked ready.",
-                    max_attempts,
+                    "Database readiness check failed after %d attempts (code=%s): %s. "
+                    "Startup cannot be marked fully ready.",
+                    _DB_READINESS_MAX_ATTEMPTS,
+                    error_code,
                     exc,
                 )
-                raise RuntimeError("Database readiness check failed") from exc
+                raise RuntimeError(
+                    f"Database readiness check failed: {exc}"
+                ) from exc
+
+    # Unreachable, but keeps type-checkers happy if the loop is empty.
+    raise RuntimeError("Database readiness check failed") from last_exc
 
 
 async def _prewarm_supabase_dns() -> None:

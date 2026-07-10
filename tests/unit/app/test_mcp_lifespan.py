@@ -195,6 +195,24 @@ async def test_create_lifespan_rejects_mcp_app_without_lifespan() -> None:
             pass
 
 
+def _patch_shutdown_hooks(
+    monkeypatch: pytest.MonkeyPatch,
+    events: list[str],
+) -> None:
+    async def noop_async(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(lifespan_module, "shutdown_scheduler", lambda: None)
+    monkeypatch.setattr(lifespan_module, "_shutdown_ai_providers", noop_async)
+    monkeypatch.setattr(lifespan_module, "_shutdown_shared_http_clients", noop_async)
+    monkeypatch.setattr(lifespan_module, "close_all_http_clients", noop_async)
+    monkeypatch.setattr(lifespan_module, "_shutdown_cache", noop_async)
+    monkeypatch.setattr(lifespan_module, "_shutdown_notification_executor", lambda: None)
+    monkeypatch.setattr(lifespan_module, "mark_engines_disposing", lambda: None)
+    monkeypatch.setattr(lifespan_module, "engine", _DisposableEngine(events, "engine"))
+    monkeypatch.setattr(lifespan_module, "bg_engine", _DisposableEngine(events, "bg_engine"))
+
+
 @pytest.mark.asyncio
 async def test_non_production_required_startup_failures_record_degraded_state(
     monkeypatch: pytest.MonkeyPatch,
@@ -206,29 +224,20 @@ async def test_non_production_required_startup_failures_record_degraded_state(
         raise RuntimeError("db down")
 
     async def fail_migrations() -> None:
-        events.append("required:ddl")
+        events.append("optional:ddl")
         raise RuntimeError("ddl down")
 
-    async def optional_startup(app: FastAPI) -> None:
-        events.append("optional")
-
-    async def noop_async() -> None:
-        pass
+    async def noop_async(*_args: Any, **_kwargs: Any) -> None:
+        return None
 
     monkeypatch.setattr(lifespan_module.settings, "ENVIRONMENT", "development")
     monkeypatch.setattr(lifespan_module, "_validate_deeplink_config", lambda: None)
     monkeypatch.setattr(lifespan_module, "_verify_database_ready", fail_database_ready)
     monkeypatch.setattr(lifespan_module, "_apply_pending_migrations", fail_migrations)
-    monkeypatch.setattr(lifespan_module, "_run_optional_startup", optional_startup)
-    monkeypatch.setattr(lifespan_module, "shutdown_scheduler", lambda: None)
-    monkeypatch.setattr(lifespan_module, "_shutdown_ai_providers", noop_async)
-    monkeypatch.setattr(lifespan_module, "_shutdown_shared_http_clients", noop_async)
-    monkeypatch.setattr(lifespan_module, "close_all_http_clients", noop_async)
-    monkeypatch.setattr(lifespan_module, "_shutdown_cache", noop_async)
-    monkeypatch.setattr(lifespan_module, "_shutdown_notification_executor", lambda: None)
-    monkeypatch.setattr(lifespan_module, "mark_engines_disposing", lambda: None)
-    monkeypatch.setattr(lifespan_module, "engine", _DisposableEngine(events, "engine"))
-    monkeypatch.setattr(lifespan_module, "bg_engine", _DisposableEngine(events, "bg_engine"))
+    monkeypatch.setattr(lifespan_module, "_initialize_cache", noop_async)
+    monkeypatch.setattr(lifespan_module, "_prewarm_supabase_dns", noop_async)
+    monkeypatch.setattr(lifespan_module, "_start_scheduler_jobs", noop_async)
+    _patch_shutdown_hooks(monkeypatch, events)
 
     app = FastAPI()
     app_lifespan = create_lifespan(
@@ -241,23 +250,74 @@ async def test_non_production_required_startup_failures_record_degraded_state(
         events.append("yield")
 
     assert app.state.startup_degraded is True
+    # Migrations are skipped when readiness already failed (avoid another
+    # multi-second SQLAlchemy hang on the same pooler outage).
     assert app.state.startup_errors == [
         {"phase": "database_readiness", "error": "db down"},
-        {"phase": "startup_migrations", "error": "ddl down"},
     ]
-    assert "optional" in events
+    assert "required:db" in events
+    assert "optional:ddl" not in events
     assert "yield" in events
 
 
 @pytest.mark.asyncio
-async def test_production_required_startup_failure_aborts_startup(
+async def test_production_transient_db_readiness_degrades_instead_of_aborting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pooler pressure must not abort production boot (Railway /health)."""
+    events: list[str] = []
+
+    async def fail_database_ready() -> None:
+        events.append("required:db")
+        raise RuntimeError(
+            "Database readiness check failed: (ECHECKOUTTIMEOUT) unable to "
+            "check out connection from the pool after 60000ms in Transaction mode"
+        )
+
+    async def noop_async(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(lifespan_module.settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(lifespan_module, "_validate_deeplink_config", lambda: None)
+    monkeypatch.setattr(lifespan_module, "_verify_database_ready", fail_database_ready)
+    monkeypatch.setattr(lifespan_module, "_apply_pending_migrations", noop_async)
+    monkeypatch.setattr(lifespan_module, "_initialize_cache", noop_async)
+    monkeypatch.setattr(lifespan_module, "_prewarm_supabase_dns", noop_async)
+    monkeypatch.setattr(lifespan_module, "_start_scheduler_jobs", noop_async)
+    _patch_shutdown_hooks(monkeypatch, events)
+
+    app = FastAPI()
+    app_lifespan = create_lifespan(
+        testing=False,
+        user_mcp_app=_RouterOnlyMCPApp(events, "user"),
+        admin_mcp_app=_RouterOnlyMCPApp(events, "admin"),
+    )
+
+    async with app_lifespan(app):
+        events.append("yield")
+
+    assert "yield" in events
+    assert app.state.startup_degraded is True
+    assert app.state.startup_errors == [
+        {
+            "phase": "database_readiness",
+            "error": (
+                "Database readiness check failed: (ECHECKOUTTIMEOUT) unable to "
+                "check out connection from the pool after 60000ms in Transaction mode"
+            ),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_production_non_transient_db_readiness_aborts_startup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     events: list[str] = []
 
     async def fail_database_ready() -> None:
         events.append("required:db")
-        raise RuntimeError("db down")
+        raise RuntimeError("password authentication failed for user \"postgres\"")
 
     async def optional_startup(app: FastAPI) -> None:
         events.append("optional")
@@ -273,9 +333,115 @@ async def test_production_required_startup_failure_aborts_startup(
         admin_mcp_app=_RouterOnlyMCPApp(events, "admin"),
     )
 
-    with pytest.raises(RuntimeError, match="db down"):
+    with pytest.raises(RuntimeError, match="password authentication failed"):
         async with app_lifespan(FastAPI()):
             pass
 
     assert "optional" not in events
     assert events == ["enter:user", "enter:admin", "required:db", "exit:admin", "exit:user"]
+
+
+@pytest.mark.asyncio
+async def test_production_startup_migration_failure_does_not_abort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Startup DDL is best-effort and must not block serving traffic."""
+    events: list[str] = []
+
+    async def pass_database_ready() -> None:
+        events.append("required:db")
+
+    async def fail_migrations() -> None:
+        events.append("optional:ddl")
+        raise RuntimeError("ddl down")
+
+    async def noop_async(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(lifespan_module.settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(lifespan_module, "_validate_deeplink_config", lambda: None)
+    monkeypatch.setattr(lifespan_module, "_verify_database_ready", pass_database_ready)
+    monkeypatch.setattr(lifespan_module, "_apply_pending_migrations", fail_migrations)
+    monkeypatch.setattr(lifespan_module, "_initialize_cache", noop_async)
+    monkeypatch.setattr(lifespan_module, "_prewarm_supabase_dns", noop_async)
+    monkeypatch.setattr(lifespan_module, "_start_scheduler_jobs", noop_async)
+    _patch_shutdown_hooks(monkeypatch, events)
+
+    app = FastAPI()
+    app_lifespan = create_lifespan(
+        testing=False,
+        user_mcp_app=_RouterOnlyMCPApp(events, "user"),
+        admin_mcp_app=_RouterOnlyMCPApp(events, "admin"),
+    )
+
+    async with app_lifespan(app):
+        events.append("yield")
+
+    assert "yield" in events
+    assert app.state.startup_degraded is True
+    assert app.state.startup_errors == [
+        {"phase": "startup_migrations", "error": "ddl down"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_verify_database_ready_retries_then_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Readiness exhausts short attempts and raises with the last error."""
+    attempts = {"n": 0}
+
+    async def always_fail() -> None:
+        attempts["n"] += 1
+        raise RuntimeError(
+            "(ECHECKOUTTIMEOUT) unable to check out connection from the pool"
+        )
+
+    monkeypatch.setattr(lifespan_module, "_DB_READINESS_MAX_ATTEMPTS", 3)
+    monkeypatch.setattr(lifespan_module, "_DB_READINESS_ATTEMPT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(lifespan_module, "_DB_READINESS_MAX_SLEEP_S", 0.0)
+    monkeypatch.setattr(lifespan_module, "_raw_database_probe", always_fail)
+
+    with pytest.raises(RuntimeError, match="Database readiness check failed"):
+        await lifespan_module._verify_database_ready()
+
+    assert attempts["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_verify_database_ready_fails_fast_on_non_transient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auth/config errors must not burn the full retry budget."""
+    attempts = {"n": 0}
+
+    async def auth_fail() -> None:
+        attempts["n"] += 1
+        raise RuntimeError('password authentication failed for user "postgres"')
+
+    monkeypatch.setattr(lifespan_module, "_DB_READINESS_MAX_ATTEMPTS", 12)
+    monkeypatch.setattr(lifespan_module, "_raw_database_probe", auth_fail)
+
+    with pytest.raises(RuntimeError, match="password authentication failed"):
+        await lifespan_module._verify_database_ready()
+
+    assert attempts["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_is_transient_readiness_failure_classifies_pooler_errors() -> None:
+    wrapped = RuntimeError(
+        "Database readiness check failed: (ECHECKOUTTIMEOUT) unable to "
+        "check out connection from the pool"
+    )
+    wrapped.__cause__ = Exception(
+        "(ECHECKOUTTIMEOUT) unable to check out connection from the pool"
+    )
+    assert lifespan_module._is_transient_readiness_failure(wrapped) is True
+    assert (
+        lifespan_module._is_transient_readiness_failure(
+            RuntimeError("password authentication failed for user \"postgres\"")
+        )
+        is False
+    )
+    assert lifespan_module._is_transient_readiness_failure(TimeoutError()) is True

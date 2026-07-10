@@ -17,6 +17,27 @@ _ENV_FILE_MAP = {
 _CURRENT_ENV = os.getenv("ENVIRONMENT", "development")
 _ENV_FILE = _ENV_FILE_MAP.get(_CURRENT_ENV, ".env.dev")
 
+_SUPABASE_HOST_MARKERS = (".supabase.com", ".pooler.supabase.com")
+
+
+def _ensure_supabase_sslmode(url: str) -> str:
+    """Append ``sslmode=require`` for Supabase hosts when not already set."""
+    if "sslmode=" in url:
+        return url
+    host = ""
+    try:
+        # Lightweight parse: scheme://user:pass@host:port/db?...
+        after_scheme = url.split("://", 1)[-1]
+        authority = after_scheme.split("/", 1)[0]
+        host_port = authority.rsplit("@", 1)[-1]
+        host = host_port.rsplit(":", 1)[0].lower()
+    except Exception:
+        host = ""
+    if not host or not any(host.endswith(marker) for marker in _SUPABASE_HOST_MARKERS):
+        return url
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}sslmode=require"
+
 
 class Settings(BaseSettings):
     SECRET_FIELD_NAMES: ClassVar[frozenset[str]] = frozenset(
@@ -159,13 +180,18 @@ class Settings(BaseSettings):
 
     @property
     def ASYNC_DATABASE_URL(self) -> str:
-        """Convert DATABASE_URL to async format for psycopg (better PgBouncer support)"""
+        """Convert DATABASE_URL to async format for psycopg (better PgBouncer support).
+
+        Supabase pooler hosts always get ``sslmode=require`` when missing — the
+        same guarantee the migration script applies. Without it, cold-start
+        handshakes against Supavisor can fail intermittently under Railway.
+        """
         url = self.DATABASE_URL
         if url.startswith("postgresql://"):
             url = url.replace("postgresql://", "postgresql+psycopg://", 1)
         elif url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql+psycopg://", 1)
-        return url
+        return _ensure_supabase_sslmode(url)
 
     @property
     def SUPABASE_CLIENT_KEY(self) -> str:

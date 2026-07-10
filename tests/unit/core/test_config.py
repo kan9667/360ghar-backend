@@ -60,6 +60,68 @@ class TestSettings:
             settings = config.Settings()
             assert settings.ASYNC_DATABASE_URL == "postgresql+psycopg://user:pass@localhost:5432/db"
 
+    def test_async_database_url_adds_sslmode_for_supabase_pooler(self):
+        """Supabase pooler URLs get sslmode=require when missing."""
+        with patch.dict(os.environ, {
+            "DATABASE_URL": (
+                "postgresql://postgres.abc:secret@aws-0-ap-south-1.pooler.supabase.com:6543/postgres"
+            ),
+            "SUPABASE_URL": "https://test.supabase.co",
+            "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_test",
+            "SUPABASE_SECRET_KEY": "test_secret",
+            "SENTRY_DSN": "https://test@sentry.io/123",
+        }, clear=False):
+            from importlib import reload
+
+            from app.core import config
+            reload(config)
+
+            settings = config.Settings()
+            url = settings.ASYNC_DATABASE_URL
+            assert url.startswith("postgresql+psycopg://")
+            assert "sslmode=require" in url
+            assert "pooler.supabase.com:6543" in url
+
+    def test_async_database_url_preserves_existing_sslmode(self):
+        """Do not duplicate sslmode when the URL already has one."""
+        with patch.dict(os.environ, {
+            "DATABASE_URL": (
+                "postgresql://postgres.abc:secret@aws-0-ap-south-1.pooler.supabase.com:6543/"
+                "postgres?sslmode=verify-full"
+            ),
+            "SUPABASE_URL": "https://test.supabase.co",
+            "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_test",
+            "SUPABASE_SECRET_KEY": "test_secret",
+            "SENTRY_DSN": "https://test@sentry.io/123",
+        }, clear=False):
+            from importlib import reload
+
+            from app.core import config
+            reload(config)
+
+            settings = config.Settings()
+            url = settings.ASYNC_DATABASE_URL
+            assert "sslmode=verify-full" in url
+            assert url.count("sslmode=") == 1
+
+    def test_async_database_url_skips_sslmode_for_local_hosts(self):
+        """Local/non-Supabase URLs are not forced onto SSL."""
+        with patch.dict(os.environ, {
+            "DATABASE_URL": "postgresql://user:pass@localhost:5432/db",
+            "SUPABASE_URL": "https://test.supabase.co",
+            "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_test",
+            "SUPABASE_SECRET_KEY": "test_secret",
+            "SENTRY_DSN": "https://test@sentry.io/123",
+        }, clear=False):
+            from importlib import reload
+
+            from app.core import config
+            reload(config)
+
+            settings = config.Settings()
+            assert settings.ASYNC_DATABASE_URL == "postgresql+psycopg://user:pass@localhost:5432/db"
+            assert "sslmode=" not in settings.ASYNC_DATABASE_URL
+
     def test_default_cache_settings(self):
         """Test default cache configuration values."""
         with patch.dict(os.environ, {
