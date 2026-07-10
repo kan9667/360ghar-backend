@@ -5,10 +5,12 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.core.utils import utc_now
 from app.models.enums import FlatmatesProfileStatus, UserMatchStatus
 from app.models.properties import Property
 from app.models.social import UserBlock, UserMatch
@@ -71,30 +73,11 @@ def _profile_non_negotiables(prefs: dict[str, Any]) -> list[str]:
     return [str(value) for value in raw if str(value).strip()]
 
 
-def _compatibility_percentage(current_user: User | None, peer: User) -> float | None:
-    if current_user is None:
-        return None
-    fields = (
-        ("flatmates_sleep_schedule", 18),
-        ("flatmates_cleanliness", 18),
-        ("flatmates_food_habits", 16),
-        ("flatmates_smoking_drinking", 18),
-        ("flatmates_guests_policy", 14),
-        ("flatmates_work_style", 16),
-    )
-    possible = 0
-    score = 0
-    for attr, weight in fields:
-        current_value = getattr(current_user, attr, None)
-        peer_value = getattr(peer, attr, None)
-        if current_value is None or peer_value is None:
-            continue
-        possible += weight
-        if current_value == peer_value:
-            score += weight
-    if possible == 0:
-        return None
-    return round((score / possible) * 100, 1)
+def _compatibility_result(current_user: User | None, peer: User) -> dict[str, Any]:
+    """Compatibility result used to populate peer match fields."""
+    from app.services.flatmates.compatibility import calculate_compatibility
+
+    return calculate_compatibility(current_user, peer)
 
 
 def _build_profile_payload(user: User) -> dict[str, Any]:
@@ -162,9 +145,15 @@ def _build_peer_payload(
         "party_habit": (
             str(prefs["parties_at_home"]) if prefs.get("parties_at_home") is not None else None
         ),
-        "match_percentage": _compatibility_percentage(current_user, user),
+        "match_percentage": None,
+        "top_matches": [],
         "phone_number": user.phone,
     }
+
+    if current_user is not None and current_user.id != user.id:
+        compat = _compatibility_result(current_user, user)
+        payload["match_percentage"] = compat["percentage"]
+        payload["top_matches"] = compat["top_match_chips"]
 
     if property_obj is not None:
         # Build image_urls from the related PropertyImage rows (already eager-loaded).
@@ -338,28 +327,36 @@ async def _ensure_match(
     other_user_id: int,
     context_property_id: int | None = None,
 ) -> UserMatch:
-    user_one_id, user_two_id = _canonical_pair(user_id, other_user_id)
-    stmt = select(UserMatch).where(
-        UserMatch.user_one_id == user_one_id,
-        UserMatch.user_two_id == user_two_id,
-    )
-    result = await db.execute(stmt)
-    match = result.scalar_one_or_none()
-    if match:
-        if context_property_id is not None:
-            match.context_property_id = context_property_id
-        if match.status != UserMatchStatus.active:
-            match.status = UserMatchStatus.active
-        return match
+    """Atomically upsert a UserMatch row for the canonical user pair.
 
-    match = UserMatch(
+    A mutual like can race from both sides; the unique index on the canonical
+    pair is used as the conflict target for a single atomic upsert.
+    """
+    user_one_id, user_two_id = _canonical_pair(user_id, other_user_id)
+    now = utc_now()
+    insert_stmt = pg_insert(UserMatch).values(
         user_one_id=user_one_id,
         user_two_id=user_two_id,
         context_property_id=context_property_id,
         status=UserMatchStatus.active,
+        updated_at=now,
     )
-    db.add(match)
-    await db.flush()
+    stmt = insert_stmt.on_conflict_do_update(
+        index_elements=["user_one_id", "user_two_id"],
+        set_={
+            "status": UserMatchStatus.active,
+            "updated_at": now,
+            "context_property_id": func.coalesce(
+                insert_stmt.excluded.context_property_id,
+                UserMatch.context_property_id,
+            ),
+        },
+    ).returning(UserMatch.id)
+    result = await db.execute(stmt)
+    match_id = result.scalar_one()
+    match = await db.get(UserMatch, match_id)
+    if match is None:
+        raise RuntimeError("Failed to load user match")
     return match
 
 

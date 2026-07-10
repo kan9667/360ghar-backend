@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from app.services.flatmates.compatibility import (
+    calculate_compatibility,
+    calculate_compatibility_score,
+    calculate_property_compatibility_score,
+    user_has_lifestyle_profile,
+)
 from app.services.flatmates.conversations import (
     create_conversation_from_payload,
     get_conversation,
@@ -55,6 +61,12 @@ from app.services.flatmates.realtime import (
 from app.services.flatmates.visits import update_visit_status
 
 __all__ = [
+    # compatibility
+    "calculate_compatibility",
+    "calculate_compatibility_score",
+    "calculate_property_compatibility_score",
+    "user_has_lifestyle_profile",
+
     # profiles
     "get_flatmates_profile",
     "get_profile_by_id",

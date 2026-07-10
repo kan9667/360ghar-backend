@@ -5,14 +5,20 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.api_v1.dependencies.auth import get_current_cached_active_user
+from app.api.api_v1.dependencies.auth import (
+    get_current_active_user,
+    get_current_cached_active_user,
+)
 from app.core.database import get_db
+from app.core.exceptions import BadRequestException, NotFoundException
 from app.core.logging import get_logger
+from app.models.users import User as UserModel
 from app.schemas.flatmates import (
     BlockCreate,
     BlockedUserOut,
     BlockOut,
     CatalogEntry,
+    CompatibilityBreakdown,
     ConversationCreate,
     ConversationSummary,
     FlatmatesBootstrap,
@@ -27,6 +33,7 @@ from app.schemas.flatmates import (
     MessageCreate,
     MessageListResponse,
     MessageOut,
+    OutgoingLikeSummary,
     ProfileViewEventCreate,
     ProfileViewEventOut,
     QnAAnswers,
@@ -69,6 +76,7 @@ from app.services.flatmates import (
     unmatch_user_pair,
     update_flatmates_profile,
 )
+from app.services.flatmates.compatibility import calculate_compatibility
 
 logger = get_logger(__name__)
 
@@ -139,6 +147,38 @@ async def get_user_profile(
 ):
     """Get flatmate profile by user."""
     return await get_profile_by_id(db, user_id, current_user_id=current_user.id)
+
+
+@router.get(
+    "/profiles/{user_id}/compatibility",
+    response_model=CompatibilityBreakdown,
+    summary="Get compatibility breakdown with a flatmate",
+)
+async def get_user_compatibility(
+    user_id: int,
+    current_user: UserModel = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the full compatibility breakdown between the current user and the peer."""
+    if current_user.id == user_id:
+        raise BadRequestException(
+            detail="Cannot compute compatibility with yourself.",
+            error_code="SELF_COMPATIBILITY",
+        )
+
+    peer = await db.get(UserModel, user_id)
+    if peer is None:
+        raise NotFoundException(detail="User not found", error_code="USER_NOT_FOUND")
+
+    result = calculate_compatibility(current_user, peer)
+    return CompatibilityBreakdown(
+        user_id=current_user.id,
+        peer_id=user_id,
+        overall_percentage=result["percentage"],
+        color=result["color"],
+        dimensions=result["dimensions"],
+        summary=result["summary"],
+    )
 
 
 @router.get("/profiles", response_model=CursorPage[FlatmatesPeer], summary="Discover flatmate profiles")
@@ -220,7 +260,7 @@ async def get_incoming_likes(
     )
 
 
-@router.get("/outgoing-likes", response_model=CursorPage[IncomingLikeSummary], summary="List outgoing likes")
+@router.get("/outgoing-likes", response_model=CursorPage[OutgoingLikeSummary], summary="List outgoing likes")
 async def get_outgoing_likes(
     page: CursorParams = Depends(),
     current_user: UserSchema = Depends(get_current_cached_active_user),
@@ -235,7 +275,7 @@ async def get_outgoing_likes(
         with_total=page.include_total,
     )
     return build_cursor_page(
-        [IncomingLikeSummary.model_validate(r) for r in rows],
+        [OutgoingLikeSummary.model_validate(r) for r in rows],
         limit=page.limit,
         next_payload=next_payload,
         total=total,

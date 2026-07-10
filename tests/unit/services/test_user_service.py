@@ -117,6 +117,10 @@ class TestGetOrCreateUserFromSupabase:
         existing = MagicMock()
         existing.id = 1
         existing.is_active = True
+        # Already fully verified so upgrade helper is a no-op (no flush).
+        existing.email_verified = True
+        existing.phone_verified = True
+        existing.is_verified = True
 
         with patch(
             "app.services.user.get_user_by_supabase_id",
@@ -136,6 +140,79 @@ class TestGetOrCreateUserFromSupabase:
 
         assert result is existing
         db.execute.assert_not_awaited()
+        db.flush.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_existing_active_user_upgrades_verification_flags(self):
+        """Hot path still upgrades email/phone/is_verified when payload advances them."""
+        from app.services.user import get_or_create_user_from_supabase
+
+        db = AsyncMock(spec=AsyncSession)
+        existing = MagicMock()
+        existing.id = 1
+        existing.is_active = True
+        existing.email_verified = False
+        existing.phone_verified = False
+        existing.is_verified = False
+
+        with patch(
+            "app.services.user.get_user_by_supabase_id",
+            new=AsyncMock(return_value=existing),
+        ):
+            result = await get_or_create_user_from_supabase(
+                db,
+                {
+                    "id": str(uuid.uuid4()),
+                    "phone": "+919111222333",
+                    "email": "later@example.com",
+                    "email_verified": True,
+                    "phone_verified": True,
+                    "email_confirmed_at": "2025-01-01T00:00:00Z",
+                    "user_metadata": {},
+                },
+            )
+
+        assert result is existing
+        assert existing.email_verified is True
+        assert existing.phone_verified is True
+        assert existing.is_verified is True
+        db.flush.assert_awaited()
+        db.execute.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_existing_active_user_does_not_downgrade_verification(self):
+        """Missing/false verification claims must not clear already-verified flags."""
+        from app.services.user import get_or_create_user_from_supabase
+
+        db = AsyncMock(spec=AsyncSession)
+        existing = MagicMock()
+        existing.id = 1
+        existing.is_active = True
+        existing.email_verified = True
+        existing.phone_verified = True
+        existing.is_verified = True
+
+        with patch(
+            "app.services.user.get_user_by_supabase_id",
+            new=AsyncMock(return_value=existing),
+        ):
+            result = await get_or_create_user_from_supabase(
+                db,
+                {
+                    "id": str(uuid.uuid4()),
+                    "phone": "+919111222333",
+                    "email": "user@example.com",
+                    # JWT often omits confirmed_at / verified flags entirely
+                    "email_confirmed_at": None,
+                    "user_metadata": {},
+                },
+            )
+
+        assert result is existing
+        assert existing.email_verified is True
+        assert existing.phone_verified is True
+        assert existing.is_verified is True
+        db.flush.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_create_new_user(self, db_session: AsyncSession):

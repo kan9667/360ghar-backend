@@ -266,3 +266,4 @@ class TestDeleteUserService:
 
         assert test_user.is_active is False
         assert test_user.supabase_user_id == f"__deleted__{test_user.id}"
+

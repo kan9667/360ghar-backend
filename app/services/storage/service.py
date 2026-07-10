@@ -5,7 +5,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from fastapi import UploadFile
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import (
@@ -700,10 +700,11 @@ class StorageService:
     ) -> dict[str, list[str]]:
         """Bulk-delete media files owned by ``actor``.
 
-        Reuses the single-delete ownership rule: only media whose ``user_id``
-        matches the actor are deleted. IDs that are not found or are owned by
-        another user are returned in ``failed`` rather than aborting the batch.
-        Underlying storage objects are best-effort deleted via ``delete_file``.
+        Each entry may be a ``MediaFile.id`` (UUID) or a full ``public_url``.
+        Only media whose ``user_id`` matches the actor are deleted. IDs/URLs
+        that are not found or are owned by another user are returned in
+        ``failed`` rather than aborting the batch. Underlying storage objects
+        are best-effort deleted via ``delete_file``.
         """
         from app.schemas.storage import BatchDeleteResponse
 
@@ -715,27 +716,50 @@ class StorageService:
             return BatchDeleteResponse(deleted=deleted, failed=failed, storage_warnings=storage_warnings).model_dump()
 
         # Deduplicate while preserving order.
-        unique_ids: list[str] = []
+        unique_inputs: list[str] = []
         seen: set[str] = set()
         for mid in media_ids:
             if mid not in seen:
                 seen.add(mid)
-                unique_ids.append(mid)
+                unique_inputs.append(mid)
+
+        id_inputs: list[str] = []
+        url_inputs: list[str] = []
+        for item in unique_inputs:
+            if item.startswith(("http://", "https://")):
+                url_inputs.append(item)
+            else:
+                id_inputs.append(item)
 
         stmt = select(MediaFile).where(
-            MediaFile.id.in_(unique_ids),
             MediaFile.user_id == actor.id,
+            or_(
+                MediaFile.id.in_(id_inputs) if id_inputs else False,
+                MediaFile.file_url.in_(url_inputs) if url_inputs else False,
+            ),
         )
         result = await db.execute(stmt)
-        owned = {m.id: m for m in result.scalars().all()}
+        by_id: dict[str, MediaFile] = {}
+        by_url: dict[str, MediaFile] = {}
+        for media in result.scalars().all():
+            by_id[media.id] = media
+            if media.file_url:
+                by_url[media.file_url] = media
 
-        owned_set = set(owned.keys())
-        # Requested but not owned/found → failed (preserve input order).
-        for mid in unique_ids:
-            if mid not in owned_set:
-                failed.append(mid)
+        deleted_media: set[str] = set()
+        for item in unique_inputs:
+            # Prefer URL lookup when the request string is a URL; otherwise id.
+            media = by_url.get(item) or by_id.get(item)
+            if media is None:
+                failed.append(item)
+                continue
+            if media.id in deleted_media:
+                # Same media was referenced twice (once by id and once by URL).
+                # Echo the original request identifier for client correlation.
+                deleted.append(item)
+                continue
+            deleted_media.add(media.id)
 
-        for mid, media in owned.items():
             file_path: str | None = media.storage_path
             if not file_path and media.filename:
                 file_path = (
@@ -746,10 +770,11 @@ class StorageService:
                 try:
                     self.delete_file(file_path, bucket_name=bucket_name)
                 except Exception as e:  # noqa: BLE001
-                    logger.error("Storage deletion failed for media %s: %s", mid, e)
-                    storage_warnings.append(mid)
+                    logger.error("Storage deletion failed for media %s: %s", media.id, e)
+                    storage_warnings.append(media.id)
             await db.delete(media)
-            deleted.append(mid)
+            # Always echo the original request item (id or URL), not media.id.
+            deleted.append(item)
 
         await db.flush()
         return BatchDeleteResponse(deleted=deleted, failed=failed, storage_warnings=storage_warnings).model_dump()

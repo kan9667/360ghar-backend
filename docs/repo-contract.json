@@ -208,6 +208,7 @@
     "data_hub_scheduler.py",
     "email.py",
     "flatmates/conversations.py",
+    "flatmates/compatibility.py",
     "flatmates/helpers.py",
     "flatmates/interactions.py",
     "flatmates/matching.py",

@@ -33,6 +33,7 @@ from app.services.flatmates.helpers import (
 )
 from app.services.flatmates.realtime import flatmates_realtime_config
 from app.services.notifications import _supa, list_notifications_for_user
+from app.services.storage import storage_service
 from app.utils.validators import ValidationUtils
 
 logger = get_logger(__name__)
@@ -328,6 +329,13 @@ async def update_flatmates_profile(
         url = update_data.pop("profile_image_url")
         if url is not None and not ValidationUtils.is_absolute_url(url):
             logger.warning("Non-absolute profile_image_url for user %s: %s", user_id, url)
+        previous_url = user.profile_image_url
+        if previous_url and previous_url != url:
+            # Best-effort remove the previous avatar on clear or replace.
+            try:
+                storage_service.delete_file(previous_url)
+            except Exception:
+                logger.warning("Failed to delete old profile image for user %s", user_id)
         user.profile_image_url = url
     if "email" in update_data:
         user.email = update_data.pop("email")

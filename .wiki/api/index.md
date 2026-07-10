@@ -62,6 +62,14 @@ All REST routers are mounted by `app/api/api_v1/api.py` onto a single `APIRouter
 - `/api/v1/redoc` - ReDoc
 - `/api/v1/openapi.yaml` - OpenAPI spec
 
+## Flatmates compatibility endpoint
+
+The `/flatmates` group now exposes a per-user compatibility endpoint at:
+
+- `GET /flatmates/profiles/{user_id}/compatibility` — returns a `CompatibilityBreakdown` with per-dimension scores, summaries, and top-match chips.
+
+The engine is implemented in `app/services/flatmates/compatibility.py` and is also used to populate `match_percentage` on `FlatmatesPeer` results and `compatibility_score` on `Property` detail/search/recommendation responses.
+
 ## Conventions
 
 - Endpoints are thin controllers. They validate input via Pydantic schemas, enforce auth through dependencies, and delegate to `app/services/`.

@@ -1,25 +1,85 @@
 from __future__ import annotations
 
-from typing import Any
-
-from sqlalchemy import and_, case, desc, func, or_, select, update
+from sqlalchemy import and_, case, desc, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlalchemy.sql.elements import ColumnElement
 
 from app.config import settings
 from app.core.db_resilience import apply_statement_timeout, execute_with_transient_retry
 from app.core.utils import utc_now
-from app.models.properties import Amenity, Property, PropertyAmenity
+from app.models.properties import Property, PropertyAmenity
 from app.models.users import UserSwipe
+from app.repositories.property_query_builder import PropertyQueryBuilder
 from app.schemas.pagination import offset_payload, read_offset
 from app.schemas.property import PropertySwipe, SortBy, UnifiedPropertyFilter
-from app.utils.geo import normalize_city
 
 
-def _property_ts_vector_column() -> ColumnElement[Any]:
-    """Return the trigger-maintained indexed FTS column for property search."""
-    return Property.__table__.c["__ts_vector__"]
+async def _upsert_user_swipe(
+    db: AsyncSession,
+    user_id: int,
+    *,
+    property_id: int | None,
+    target_user_id: int | None,
+    context_property_id: int | None,
+    target_type: str,
+    swipe_action: str,
+    is_liked: bool,
+) -> tuple[UserSwipe, bool, bool]:
+    """Atomically insert or lock-and-update a user swipe.
+
+    Returns:
+        A tuple of (swipe, was_liked, created). `was_liked` is the previous
+        `is_liked` value, and `created` is True when a new row was inserted.
+    """
+    if target_type == "property":
+        conflict_cols = ["user_id", "property_id"]
+        conflict_where = None
+        where_clause = and_(
+            UserSwipe.user_id == user_id,
+            UserSwipe.property_id == property_id,
+        )
+    else:
+        conflict_cols = ["user_id", "target_user_id"]
+        conflict_where = UserSwipe.target_user_id.is_not(None)
+        where_clause = and_(
+            UserSwipe.user_id == user_id,
+            UserSwipe.target_user_id == target_user_id,
+        )
+
+    now = utc_now()
+    insert_stmt = (
+        pg_insert(UserSwipe)
+        .values(
+            user_id=user_id,
+            property_id=property_id,
+            target_user_id=target_user_id,
+            context_property_id=context_property_id,
+            target_type=target_type,
+            swipe_action=swipe_action,
+            is_liked=is_liked,
+            updated_at=now,
+        )
+        .on_conflict_do_nothing(index_elements=conflict_cols, index_where=conflict_where)
+        .returning(UserSwipe.id)
+    )
+    result = await db.execute(insert_stmt)
+    swipe_id = result.scalar_one_or_none()
+    if swipe_id is not None:
+        swipe = await db.get(UserSwipe, swipe_id)
+        if swipe is None:
+            raise RuntimeError("Failed to load newly created user swipe")
+        return swipe, False, True
+
+    swipe = (
+        await db.execute(select(UserSwipe).where(where_clause).with_for_update())
+    ).scalar_one()
+    old_is_liked = swipe.is_liked
+    swipe.target_type = target_type
+    swipe.swipe_action = swipe_action
+    swipe.is_liked = is_liked
+    swipe.context_property_id = context_property_id
+    return swipe, old_is_liked, False
 
 
 async def record_swipe(db: AsyncSession, user_id: int, swipe_data: PropertySwipe):
@@ -38,56 +98,30 @@ async def record_swipe(db: AsyncSession, user_id: int, swipe_data: PropertySwipe
         # User is trying to swipe their own property — silently ignore
         return False
 
-    # Check if swipe exists
-    stmt = select(UserSwipe).where(
-        and_(
-            UserSwipe.user_id == user_id,
-            UserSwipe.property_id == swipe_data.property_id
-        )
+    swipe_action = "like" if swipe_data.is_liked else "pass"
+    _, was_liked, _ = await _upsert_user_swipe(
+        db,
+        user_id,
+        property_id=swipe_data.property_id,
+        target_user_id=None,
+        context_property_id=None,
+        target_type="property",
+        swipe_action=swipe_action,
+        is_liked=swipe_data.is_liked,
     )
-    result = await db.execute(stmt)
-    existing_swipe = result.scalar_one_or_none()
 
-    if existing_swipe:
-        # Update existing swipe. Adjust like_count only if the status actually
-        # flipped. The in-memory `old_liked` could be stale under interleaved
-        # like→dislike→like toggles from the same user, so we re-read the DB
-        # inside the same savepoint and gate the diff on the fresh value.
-        async with db.begin_nested():
-            await db.refresh(existing_swipe)
-            old_liked_db = existing_swipe.is_liked
-            existing_swipe.is_liked = swipe_data.is_liked
-            existing_swipe.updated_at = utc_now()
-
-            if old_liked_db and not swipe_data.is_liked:
-                # Changed from like to dislike — decrement
-                await db.execute(
-                    update(Property).where(Property.id == swipe_data.property_id).values(
-                        like_count=Property.like_count - 1
-                    )
-                )
-            elif not old_liked_db and swipe_data.is_liked:
-                # Changed from dislike to like — increment
-                await db.execute(
-                    update(Property).where(Property.id == swipe_data.property_id).values(
-                        like_count=Property.like_count + 1
-                    )
-                )
-    else:
-        # Create new swipe
-        swipe = UserSwipe(
-            user_id=user_id,
-            property_id=swipe_data.property_id,
-            is_liked=swipe_data.is_liked
+    if swipe_data.is_liked and not was_liked:
+        await db.execute(
+            update(Property)
+            .where(Property.id == swipe_data.property_id)
+            .values(like_count=func.coalesce(Property.like_count, 0) + 1)
         )
-        db.add(swipe)
-
-        # Update property like count
-        if swipe_data.is_liked:
-            update_stmt = update(Property).where(Property.id == swipe_data.property_id).values(
-                like_count=Property.like_count + 1
-            )
-            await db.execute(update_stmt)
+    elif was_liked and not swipe_data.is_liked:
+        await db.execute(
+            update(Property)
+            .where(Property.id == swipe_data.property_id)
+            .values(like_count=func.greatest(func.coalesce(Property.like_count, 0) - 1, 0))
+        )
 
     await db.flush()
     return True
@@ -101,180 +135,47 @@ async def get_swipe_history(
     is_liked: bool | None,
     with_total: bool = False,
 ) -> tuple[list, dict | None, int | None]:
-    """Get user's swipe history with comprehensive property filtering"""
+    """Get user's swipe history with comprehensive property filtering."""
     await apply_statement_timeout(db, settings.DB_READ_STATEMENT_TIMEOUT_MS)
     offset = read_offset(cursor_payload)
 
-    # Base query with optimized eager loading
-    # Use outerjoin to include swipes even if property was deleted, then filter nulls
+    # Base query with optimized eager loading.
+    # Inner join excludes swipes whose property was deleted.
     query = select(UserSwipe).options(
         selectinload(UserSwipe.property).selectinload(Property.images),
-        selectinload(UserSwipe.property).selectinload(Property.property_amenities).selectinload(PropertyAmenity.amenity)
-    ).join(UserSwipe.property)  # Inner join to exclude deleted properties
+        selectinload(UserSwipe.property)
+        .selectinload(Property.property_amenities)
+        .selectinload(PropertyAmenity.amenity),
+    ).join(UserSwipe.property)
 
-    count_query = select(func.count(UserSwipe.id)).join(UserSwipe.property)  # Inner join for count too
+    count_query = select(func.count(UserSwipe.id)).join(UserSwipe.property)
 
-    from app.models.enums import PG_FLATMATE_TYPES
-
-    # Always filter by user_id
-    conditions = [UserSwipe.user_id == user_id]
-
-    # Only show swipes on available, live properties (mirrors main search filter)
-    conditions.append(Property.is_available)
-    conditions.append(
-        or_(
-            Property.property_type.notin_(PG_FLATMATE_TYPES),
-            func.coalesce(
-                Property.listing_preferences["moderation_status"].as_string(),
-                "live",
-            )
-            == "live",
-        )
-    )
-
-    # Swipe-specific filter
+    # Swipe-scoped predicates (not property filters).
+    conditions: list = [UserSwipe.user_id == user_id]
     if is_liked is not None:
         conditions.append(UserSwipe.is_liked == is_liked)
 
-    # Location-based search
-    user_location = None
-    distance = None
-    if filters.latitude is not None and filters.longitude is not None and filters.radius_km:
-        # Create a point from the user's location, ensuring SRID is set
-        user_location = func.ST_SetSRID(func.ST_MakePoint(filters.longitude, filters.latitude), 4326)
+    # Canonical property filters (availability, FTS via __ts_vector__, geo, etc.).
+    builder = PropertyQueryBuilder(filters)
+    property_conditions, distance_expr, search_meta = await builder.build(db)
+    conditions.extend(property_conditions)
 
-        # Use ST_DWithin for efficient, index-based distance filtering
-        radius_m = filters.radius_km * 1000
-        conditions.append(func.ST_DWithin(Property.location, user_location, radius_m))
+    if distance_expr is not None:
+        query = query.add_columns(distance_expr.label("distance_km"))
 
-        # Calculate distance for ordering and display
-        distance = func.ST_Distance(Property.location, user_location) / 1000
-        query = query.add_columns(distance.label('distance_km'))
+    query = query.where(and_(*conditions))
+    count_query = count_query.where(and_(*conditions))
 
-    # Text search using PostgreSQL full-text search
-    search_query_obj = None
-    search_vector = None
-    if filters.search_query:
-        search_query_obj = func.plainto_tsquery('english', filters.search_query)
-        search_vector = _property_ts_vector_column()
-        conditions.append(search_vector.op('@@')(search_query_obj))
-
-    # Property type filter
-    if filters.property_type:
-        if isinstance(filters.property_type, list) and len(filters.property_type) > 0:
-            conditions.append(Property.property_type.in_(filters.property_type))
-        elif not isinstance(filters.property_type, list):
-            conditions.append(Property.property_type == filters.property_type)
-
-    # Purpose filter
-    if filters.purpose:
-        conditions.append(Property.purpose == filters.purpose)
-
-    # Price range filters
-    if filters.price_min is not None:
-        conditions.append(Property.base_price >= filters.price_min)
-    if filters.price_max is not None:
-        conditions.append(Property.base_price <= filters.price_max)
-
-    # Bedroom filters
-    if filters.bedrooms_min is not None:
-        conditions.append(Property.bedrooms >= filters.bedrooms_min)
-    if filters.bedrooms_max is not None:
-        conditions.append(Property.bedrooms <= filters.bedrooms_max)
-
-    # Bathroom filters
-    if filters.bathrooms_min is not None:
-        conditions.append(Property.bathrooms >= filters.bathrooms_min)
-    if filters.bathrooms_max is not None:
-        conditions.append(Property.bathrooms <= filters.bathrooms_max)
-
-    # Area filters
-    if filters.area_min is not None:
-        conditions.append(Property.area_sqft >= filters.area_min)
-    if filters.area_max is not None:
-        conditions.append(Property.area_sqft <= filters.area_max)
-
-    # Location filters — normalize city via alias map, then filtered LIKE
-    if filters.city:
-        normalized_city = normalize_city(filters.city)
-        conditions.append(func.lower(Property.city).like(f"%{normalized_city.lower()}%"))
-    if filters.locality:
-        conditions.append(Property.locality.ilike(f"%{filters.locality}%"))
-    if filters.pincode:
-        conditions.append(Property.pincode == filters.pincode)
-
-    # Additional filters
-    if filters.parking_spaces_min is not None:
-        conditions.append(Property.parking_spaces >= filters.parking_spaces_min)
-
-    if filters.floor_number_min is not None:
-        conditions.append(Property.floor_number >= filters.floor_number_min)
-    if filters.floor_number_max is not None:
-        conditions.append(Property.floor_number <= filters.floor_number_max)
-
-    if filters.age_max is not None:
-        conditions.append(Property.age_of_property <= filters.age_max)
-
-    # Amenities filter
-    if filters.amenities:
-        amenity_ids = []
-        amenity_names = []
-
-        for amenity in filters.amenities:
-            if isinstance(amenity, int) or (isinstance(amenity, str) and amenity.isdigit()):
-                amenity_ids.append(int(amenity))
-            else:
-                amenity_names.append(amenity)
-
-        # Get amenity IDs from names if any
-        if amenity_names:
-            amenity_stmt = select(Amenity.id).where(Amenity.title.in_(amenity_names))
-            amenity_result = await execute_with_transient_retry(
-                db,
-                lambda: db.execute(amenity_stmt),
-                operation_name="swipe_history_amenities",
-            )
-            amenity_ids.extend([row[0] for row in amenity_result.fetchall()])
-
-        if amenity_ids:
-            amenity_subquery = (
-                select(PropertyAmenity.property_id)
-                .where(PropertyAmenity.amenity_id.in_(amenity_ids))
-                .group_by(PropertyAmenity.property_id)
-                .having(func.count(PropertyAmenity.amenity_id) >= len(amenity_ids))
-            )
-            conditions.append(Property.id.in_(amenity_subquery))
-
-    # Guests filter (max occupancy)
-    if filters.guests is not None:
-        conditions.append(Property.max_occupancy >= filters.guests)
-
-    # Apply all conditions
-    if conditions:
-        query = query.where(and_(*conditions))
-        count_query = count_query.where(and_(*conditions))
-
-    # Apply sorting
+    # newest / default sort by swipe time; other sorts use shared builder path.
     sort_by = filters.sort_by or SortBy.newest
+    query = builder.apply_sort(
+        query,
+        sort_by,
+        distance_expr=distance_expr,
+        text_rank_expr=search_meta.get("text_rank_expr"),
+        newest_column=UserSwipe.created_at,
+    )
 
-    if sort_by == SortBy.distance and distance is not None:
-        query = query.order_by(distance)
-    elif sort_by == SortBy.price_low:
-        query = query.order_by(Property.base_price.asc())
-    elif sort_by == SortBy.price_high:
-        query = query.order_by(Property.base_price.desc())
-    elif sort_by == SortBy.newest:
-        query = query.order_by(desc(UserSwipe.created_at))
-    elif sort_by == SortBy.popular:
-        query = query.order_by(Property.like_count.desc(), Property.view_count.desc())
-    elif sort_by == SortBy.relevance and search_query_obj is not None and search_vector is not None:
-        relevance_score = func.ts_rank(search_vector, search_query_obj)
-        query = query.order_by(relevance_score.desc())
-    else:
-        # Default sorting by swipe creation date
-        query = query.order_by(desc(UserSwipe.created_at))
-
-    # Compute total count before applying offset/limit if requested
     count_total: int | None = None
     if with_total:
         count_result = await execute_with_transient_retry(
@@ -284,28 +185,23 @@ async def get_swipe_history(
         )
         count_total = int(count_result.scalar() or 0)
 
-    # Add cursor-based offset pagination
     query = query.offset(offset).limit(limit + 1)
 
-    # Execute main query
     result = await execute_with_transient_retry(
         db,
         lambda: db.execute(query),
         operation_name="swipe_history_query",
     )
 
-    # Handle results - check if we have additional columns (distance)
-    if distance is not None:
+    if distance_expr is not None:
         rows = result.all()
-        swipes = [row[0] for row in rows]  # First column is the UserSwipe object
+        swipes = [row[0] for row in rows]
     else:
         swipes = list(result.scalars().all())
 
-    # Determine if there's a next page
     next_payload: dict | None = offset_payload(offset + limit) if len(swipes) > limit else None
     swipes = swipes[:limit]
 
-    # Add liked attribute to properties
     for swipe in swipes:
         if swipe.property:
             swipe.property.liked = swipe.is_liked
@@ -326,7 +222,7 @@ async def undo_last_swipe(db: AsyncSession, user_id: int):
         async with db.begin_nested():
             if last_swipe.is_liked:
                 update_stmt = update(Property).where(Property.id == last_swipe.property_id).values(
-                    like_count=Property.like_count - 1
+                    like_count=func.greatest(func.coalesce(Property.like_count, 0) - 1, 0)
                 )
                 await db.execute(update_stmt)
             await db.delete(last_swipe)
@@ -348,11 +244,11 @@ async def toggle_swipe(db: AsyncSession, swipe_id: int, user_id: int):
             swipe.is_liked = not swipe.is_liked
             if swipe.is_liked:
                 update_stmt = update(Property).where(Property.id == swipe.property_id).values(
-                    like_count=Property.like_count + 1
+                    like_count=func.coalesce(Property.like_count, 0) + 1
                 )
             else:
                 update_stmt = update(Property).where(Property.id == swipe.property_id).values(
-                    like_count=Property.like_count - 1
+                    like_count=func.greatest(func.coalesce(Property.like_count, 0) - 1, 0)
                 )
             await db.execute(update_stmt)
 
@@ -442,7 +338,7 @@ async def batch_unswipe(db: AsyncSession, user_id: int, property_ids: list[int])
                 await db.execute(
                     update(Property)
                     .where(Property.id == swipe.property_id)
-                    .values(like_count=Property.like_count - 1)
+                    .values(like_count=func.greatest(func.coalesce(Property.like_count, 0) - 1, 0))
                 )
             await db.delete(swipe)
     await db.flush()

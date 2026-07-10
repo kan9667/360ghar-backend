@@ -3,7 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.api_v1.dependencies.auth import get_current_active_user, get_current_user_optional
+from app.api.api_v1.dependencies.auth import (
+    get_current_active_user,
+    get_current_cached_active_user,
+    get_current_user_optional,
+)
 from app.config import settings
 from app.core.database import get_db
 from app.core.db_resilience import (
@@ -21,6 +25,7 @@ from app.models.enums import (
     PropertyType,
     UserRole,
 )
+from app.models.users import User as UserModel
 from app.schemas.pagination import CursorPage, CursorParams, build_cursor_page
 from app.schemas.property import (
     Property,
@@ -30,7 +35,9 @@ from app.schemas.property import (
     UnifiedPropertyFilter,
 )
 from app.schemas.user import User as UserSchema
+from app.services.auth_user_cache import AuthUserSnapshot
 from app.services.flatmates import pause_stale_flatmate_listings
+from app.services.flatmates.compatibility import calculate_property_compatibility_score
 from app.services.property import (
     create_property,
     delete_property,
@@ -254,7 +261,7 @@ async def create_new_property(
 @router.get("/me", response_model=CursorPage[Property], summary="List my properties")
 async def get_my_properties(
     page: CursorParams = Depends(),
-    current_user: UserSchema = Depends(get_current_active_user),
+    current_user: AuthUserSnapshot = Depends(get_current_cached_active_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List properties owned by the current user (requires authentication)."""
@@ -415,7 +422,7 @@ async def get_recommendations(
 async def get_property_details(
     property_id: int,
     request: Request,
-    current_user: UserSchema | None = Depends(get_current_user_optional),
+    current_user: UserModel | None = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
     """Get property details"""
@@ -449,12 +456,22 @@ async def get_property_details(
                 liked = await get_user_like_for_property(db, current_user.id, property_id)
                 # Upcoming visit stats
                 visit_stats = await get_user_property_visit_stats(db, current_user.id, property_id)
+
+            compatibility_score = None
+            if property_data.owner_id is not None and property_data.owner_id != current_user.id:
+                owner = await db.get(UserModel, property_data.owner_id)
+                if owner is not None:
+                    compatibility_score = calculate_property_compatibility_score(
+                        current_user, owner
+                    )
+
             property_data = property_data.model_copy(
                 update={
                     "liked": bool(liked) if liked is not None else None,
                     "user_has_scheduled_visit": visit_stats["count"] > 0,
                     "user_scheduled_visit_count": visit_stats["count"],
                     "user_next_visit_date": visit_stats["next_date"],
+                    "compatibility_score": compatibility_score,
                 }
             )
         except Exception as e:

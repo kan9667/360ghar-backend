@@ -28,7 +28,7 @@ app/services/
 ├── data_hub/                       # 26 scraper modules
 ├── data_hub_scheduler.py           # Data hub cron registration
 ├── email.py                        # Email service
-├── flatmates/                      # conversations, helpers, interactions, matching, moderation, profiles, visits
+├── flatmates/                      # conversations, helpers, interactions, matching, moderation, profiles, compatibility, visits
 ├── image_processing.py             # Thumbnails, EXIF (Pillow)
 ├── notification_config.py          # NOTIFICATION_TYPES registry
 ├── notification_dispatcher.py      # Multi-channel dispatch
@@ -98,6 +98,7 @@ Services own the unit of work: they begin queries on the injected session, commi
 | `app/services/user.py` | User CRUD, account deletion, Supabase sync |
 | `app/services/property/crud.py` | Property CRUD with cache and repo integration |
 | `app/services/property/search.py` | Property search (707 lines) |
+| `app/services/flatmates/compatibility.py` | 6-dimension flatmate compatibility engine |
 | `app/services/core.py` | CoreService pattern reference |
 | `app/services/booking.py` | 360 Stays bookings (overlapping bookings allowed) |
 | `app/services/pm_authz.py` | PM authorization helpers |

@@ -16,9 +16,24 @@ from fastapi.exceptions import RequestValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-def _awaited_and_caller_cleanup(gen):
-    """Drive the async generator to completion for test purposes."""
-    return gen
+def _fake_session(*, pending: bool = False) -> MagicMock:
+    """Session mock with async execute for global statement-timeout setup."""
+    fake_session = MagicMock(spec=AsyncSession)
+    fake_session.new = {object()} if pending else set()
+    fake_session.dirty = set()
+    fake_session.deleted = set()
+    fake_session.commit = AsyncMock()
+    fake_session.rollback = AsyncMock()
+    fake_session.close = AsyncMock()
+    fake_session.execute = AsyncMock(return_value=None)
+    return fake_session
+
+
+def _session_factory(fake_session: MagicMock) -> MagicMock:
+    factory = MagicMock(return_value=fake_session)
+    factory.return_value.__aenter__ = AsyncMock(return_value=fake_session)
+    factory.return_value.__aexit__ = AsyncMock(return_value=None)
+    return factory
 
 
 @pytest.mark.asyncio
@@ -26,18 +41,8 @@ async def test_get_db_does_not_commit_when_session_is_clean():
     """A read-only request (no new/dirty/deleted) must not trigger commit."""
     from app.core import database as db_module
 
-    fake_session = MagicMock(spec=AsyncSession)
-    fake_session.new = set()
-    fake_session.dirty = set()
-    fake_session.deleted = set()
-    fake_session.commit = AsyncMock()
-    fake_session.rollback = AsyncMock()
-    fake_session.close = AsyncMock()
-
-    factory = MagicMock(return_value=fake_session)
-    # Make ``async with factory() as session`` yield our fake session
-    factory.return_value.__aenter__ = AsyncMock(return_value=fake_session)
-    factory.return_value.__aexit__ = AsyncMock(return_value=None)
+    fake_session = _fake_session()
+    factory = _session_factory(fake_session)
 
     with pytest.MonkeyPatch().context() as mp:
         mp.setattr(db_module, "AsyncSessionLocal", factory)
@@ -51,6 +56,7 @@ async def test_get_db_does_not_commit_when_session_is_clean():
             await gen.__anext__()
 
     fake_session.commit.assert_not_awaited()
+    fake_session.execute.assert_awaited()  # statement_timeout setup
 
 
 @pytest.mark.asyncio
@@ -58,17 +64,8 @@ async def test_get_db_commits_when_session_has_pending_changes():
     """A request that mutated state must still commit on clean exit."""
     from app.core import database as db_module
 
-    fake_session = MagicMock(spec=AsyncSession)
-    fake_session.new = {object()}  # something pending
-    fake_session.dirty = set()
-    fake_session.deleted = set()
-    fake_session.commit = AsyncMock()
-    fake_session.rollback = AsyncMock()
-    fake_session.close = AsyncMock()
-
-    factory = MagicMock(return_value=fake_session)
-    factory.return_value.__aenter__ = AsyncMock(return_value=fake_session)
-    factory.return_value.__aexit__ = AsyncMock(return_value=None)
+    fake_session = _fake_session(pending=True)
+    factory = _session_factory(fake_session)
 
     with pytest.MonkeyPatch().context() as mp:
         mp.setattr(db_module, "AsyncSessionLocal", factory)
@@ -86,17 +83,8 @@ async def test_get_db_rolls_back_on_exception():
     """On exception, rollback must fire and commit must not."""
     from app.core import database as db_module
 
-    fake_session = MagicMock(spec=AsyncSession)
-    fake_session.new = set()
-    fake_session.dirty = set()
-    fake_session.deleted = set()
-    fake_session.commit = AsyncMock()
-    fake_session.rollback = AsyncMock()
-    fake_session.close = AsyncMock()
-
-    factory = MagicMock(return_value=fake_session)
-    factory.return_value.__aenter__ = AsyncMock(return_value=fake_session)
-    factory.return_value.__aexit__ = AsyncMock(return_value=None)
+    fake_session = _fake_session()
+    factory = _session_factory(fake_session)
 
     with pytest.MonkeyPatch().context() as mp:
         mp.setattr(db_module, "AsyncSessionLocal", factory)
@@ -115,17 +103,8 @@ async def test_get_db_does_not_log_request_validation_as_database_error(caplog):
     """FastAPI 422 request validation must not be mislabeled as a DB error."""
     from app.core import database as db_module
 
-    fake_session = MagicMock(spec=AsyncSession)
-    fake_session.new = set()
-    fake_session.dirty = set()
-    fake_session.deleted = set()
-    fake_session.commit = AsyncMock()
-    fake_session.rollback = AsyncMock()
-    fake_session.close = AsyncMock()
-
-    factory = MagicMock(return_value=fake_session)
-    factory.return_value.__aenter__ = AsyncMock(return_value=fake_session)
-    factory.return_value.__aexit__ = AsyncMock(return_value=None)
+    fake_session = _fake_session()
+    factory = _session_factory(fake_session)
     validation_exc = RequestValidationError([
         {
             "loc": ("body", "age"),
@@ -154,17 +133,8 @@ async def test_get_bg_db_does_not_commit_when_session_is_clean():
     """Background dependency also must skip commit for read-only work."""
     from app.core import database as db_module
 
-    fake_session = MagicMock(spec=AsyncSession)
-    fake_session.new = set()
-    fake_session.dirty = set()
-    fake_session.deleted = set()
-    fake_session.commit = AsyncMock()
-    fake_session.rollback = AsyncMock()
-    fake_session.close = AsyncMock()
-
-    factory = MagicMock(return_value=fake_session)
-    factory.return_value.__aenter__ = AsyncMock(return_value=fake_session)
-    factory.return_value.__aexit__ = AsyncMock(return_value=None)
+    fake_session = _fake_session()
+    factory = _session_factory(fake_session)
 
     with pytest.MonkeyPatch().context() as mp:
         mp.setattr(db_module, "AsyncSessionLocalBG", factory)

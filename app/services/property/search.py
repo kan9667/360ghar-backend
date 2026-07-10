@@ -30,11 +30,27 @@ from app.core.db_resilience import apply_statement_timeout, execute_with_transie
 from app.core.logging import get_logger
 from app.models.enums import PG_FLATMATE_TYPES, BookingStatus
 from app.models.properties import Amenity, Property, PropertyAmenity, PropertyImage
+from app.models.users import User
 from app.schemas.pagination import offset_payload, read_offset
 from app.schemas.property import Property as PropertySchema
 from app.schemas.property import SortBy, UnifiedPropertyFilter
-from app.utils.geo import normalize_city
+from app.services.flatmates.compatibility import (
+    calculate_property_compatibility_score,
+    user_has_lifestyle_profile,
+)
+from app.utils.geo import city_match_names, escape_like_pattern
 from app.vector.embedding_client import embed_query
+
+# Columns needed to score property-owner lifestyle compatibility.
+_OWNER_COMPAT_LOAD_ONLY = (
+    User.id,
+    User.flatmates_sleep_schedule,
+    User.flatmates_cleanliness,
+    User.flatmates_food_habits,
+    User.flatmates_smoking_drinking,
+    User.flatmates_guests_policy,
+    User.flatmates_work_style,
+)
 
 _vector_metadata = MetaData()
 _property_embeddings_table: Table | None = None
@@ -211,8 +227,9 @@ async def get_unified_properties_optimized(
         # into pool exhaustion. Scoped to the current transaction (SET LOCAL).
         await apply_statement_timeout(db, settings.DB_READ_STATEMENT_TIMEOUT_MS)
 
-        # Base query with eager loading
-        query = select(Property).options(
+        # Base query with eager loading. Owner lifestyle columns are loaded only
+        # when the viewer has a lifestyle profile (otherwise scoring is a no-op).
+        query_options = [
             selectinload(Property.images).load_only(
                 PropertyImage.id,
                 PropertyImage.property_id,
@@ -235,7 +252,14 @@ async def get_unified_properties_optimized(
                 Amenity.icon,
                 Amenity.category,
             ),
-        )
+        ]
+        current_user = await db.get(User, user_id) if user_id else None
+        score_compatibility = user_has_lifestyle_profile(current_user)
+        if score_compatibility:
+            query_options.append(
+                selectinload(Property.owner).load_only(*_OWNER_COMPAT_LOAD_ONLY)
+            )
+        query = select(Property).options(*query_options)
         count_query = select(func.count(Property.id))
 
         # Build base conditions
@@ -355,16 +379,30 @@ async def get_unified_properties_optimized(
             logger.debug("Adding max area filter: %s", filters.area_max)
             conditions.append(Property.area_sqft <= filters.area_max)
 
-        # Location filters — normalize via city alias map, then use filtered LIKE
-        # so properties like "New Delhi" still match a search for "Delhi",
-        # while "Gurugram" does NOT match a search for "Delhi".
+        # Location filters — match canonical city + all aliases that map to it
+        # (e.g. Gurgaon and Gurugram) via OR of filtered LIKE patterns.
+        # "Delhi" still does not match "Gurugram" because they share no alias set.
         if filters.city:
-            normalized_city = normalize_city(filters.city)
-            logger.debug("Adding city filter: %s (normalized from: %s)", normalized_city, filters.city)
-            conditions.append(func.lower(Property.city).like(f"%{normalized_city.lower()}%", escape="\\"))
+            match_names = city_match_names(filters.city)
+            logger.debug(
+                "Adding city filter: names=%s (from: %s)",
+                match_names,
+                filters.city,
+            )
+            city_clauses = [
+                func.lower(Property.city).like(
+                    f"%{escape_like_pattern(name.lower())}%",
+                    escape="\\",
+                )
+                for name in match_names
+            ]
+            if len(city_clauses) == 1:
+                conditions.append(city_clauses[0])
+            elif city_clauses:
+                conditions.append(or_(*city_clauses))
         if filters.locality:
             logger.debug("Adding locality filter: %s", filters.locality)
-            escaped_locality = filters.locality.replace("%", r"\%").replace("_", r"\_")
+            escaped_locality = escape_like_pattern(filters.locality)
             conditions.append(Property.locality.ilike(f"%{escaped_locality}%", escape="\\"))
         if filters.pincode:
             logger.debug("Adding pincode filter: %s", filters.pincode)
@@ -672,10 +710,31 @@ async def get_unified_properties_optimized(
                     schema.vector_distance = float(mapping["vector_distance"])
                 if "relevance_score" in mapping and mapping["relevance_score"] is not None:
                     schema.relevance_score = float(mapping["relevance_score"])
+                if (
+                    score_compatibility
+                    and current_user is not None
+                    and prop.owner_id is not None
+                    and prop.owner_id != current_user.id
+                ):
+                    schema.compatibility_score = calculate_property_compatibility_score(
+                        current_user, prop.owner
+                    )
                 property_list.append(schema)
         else:
             properties = list(result.scalars().all())
-            property_list = [PropertySchema.model_validate(prop) for prop in properties]
+            property_list = []
+            for prop in properties:
+                schema = PropertySchema.model_validate(prop)
+                if (
+                    score_compatibility
+                    and current_user is not None
+                    and prop.owner_id is not None
+                    and prop.owner_id != current_user.id
+                ):
+                    schema.compatibility_score = calculate_property_compatibility_score(
+                        current_user, prop.owner
+                    )
+                property_list.append(schema)
 
         # Detect has_more and compute next cursor
         has_more = len(property_list) > limit

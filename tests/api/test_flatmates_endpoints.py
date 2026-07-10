@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import AsyncClient
 
+from app.services.flatmates.realtime import flatmates_realtime_config
+
 
 def create_bootstrap_response() -> dict:
     return {
@@ -41,6 +43,7 @@ def create_bootstrap_response() -> dict:
         "active_listing_count": 1,
         "conversation_count": 2,
         "unread_message_count": 3,
+        "realtime": flatmates_realtime_config(1),
     }
 
 

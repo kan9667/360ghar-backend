@@ -417,6 +417,7 @@ class Property(PropertyInDB):
     liked: bool | None = None  # For swipe history - indicates if user liked this property
     vector_distance: float | None = None  # For semantic similarity scoring
     relevance_score: float | None = None  # Combined text + vector relevance score
+    compatibility_score: float | None = None  # Auth-aware score vs current user
     # Auth-aware context populated on detail view when user is logged in
     user_has_scheduled_visit: bool | None = None
     user_scheduled_visit_count: int | None = None

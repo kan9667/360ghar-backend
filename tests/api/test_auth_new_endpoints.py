@@ -210,6 +210,32 @@ class TestLinkIdentity:
                 json={"provider": "google", "id_token": "tok"},
             )
         assert response.status_code == 400
+        assert "already be linked" in response.json()["error"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_link_provider_error_is_400_not_unreachable(
+        self, authenticated_client: AsyncClient
+    ):
+        """Non-PROVIDER_UNREACHABLE failures must not claim temporary unreachability."""
+        from app.core.auth import AuthFailureReason, _make_failure
+
+        with patch(
+            "app.api.api_v1.endpoints.auth.admin_link_identity",
+            new=AsyncMock(
+                return_value=_make_failure(
+                    AuthFailureReason.PROVIDER_ERROR,
+                    "identity already linked",
+                )
+            ),
+        ):
+            response = await authenticated_client.post(
+                "/api/v1/auth/link-identity",
+                json={"provider": "google", "id_token": "tok"},
+            )
+        assert response.status_code == 400
+        message = response.json()["error"]["message"]
+        assert "temporarily unreachable" not in message
+        assert "already be linked" in message
 
     @pytest.mark.asyncio
     async def test_link_provider_unreachable_returns_503(

@@ -88,6 +88,50 @@ def normalize_city(city: str) -> str:
     return city.strip().title()
 
 
+def city_match_names(city: str) -> list[str]:
+    """Return display names that should match a user-supplied city filter.
+
+    Inventory historically stores both common aliases and the canonical form
+    (e.g. ``Gurgaon`` and ``Gurugram``). Filtering only on the canonical name
+    drops rows stored under an alias. This returns the canonical name plus
+    every alias that maps to the same canonical, title-cased for display and
+    LOWER()-safe matching.
+
+    Unknown cities return a single title-cased token so free-form input still
+    works.
+    """
+    if not city:
+        return []
+    stripped = city.strip()
+    if not stripped:
+        return []
+
+    canonical = normalize_city(stripped)
+    names: set[str] = {canonical}
+    canonical_lower = canonical.lower()
+    for alias, target in CITY_ALIASES.items():
+        if target.lower() != canonical_lower:
+            continue
+        names.add(target)
+        # Skip ultra-short aliases (e.g. "ncr") as LIKE tokens — they are too
+        # broad as substrings and are already covered by the canonical form
+        # for typical inventory (city="Delhi" matches "Delhi NCR" via %delhi%).
+        if len(alias) < 4:
+            continue
+        names.add(alias.title())
+    # Preserve a title-cased form of the raw input so odd casing still matches
+    # rows that stored the user-facing string literally.
+    names.add(stripped.title())
+    # Stable order: canonical first, then alphabetical remainder.
+    rest = sorted(n for n in names if n.lower() != canonical_lower)
+    return [canonical, *rest]
+
+
+def escape_like_pattern(value: str) -> str:
+    """Escape ``%`` and ``_`` for use in SQL LIKE/ILIKE with escape='\\\\'."""
+    return value.replace("%", r"\%").replace("_", r"\_")
+
+
 def wkt_point(longitude: float, latitude: float) -> str:
     """Build a PostGIS WKT POINT string with SRID=4326.
 

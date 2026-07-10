@@ -598,3 +598,108 @@ class TestFailureTagging:
         assert not _is_failure({"id": "abc", "email": "x@y.z"})
         assert not _is_failure(None)
         assert not _is_failure({"__auth_failure__": False})
+
+class TestClaimsToUserDict:
+    """Local JWT claims → user-dict conversion."""
+
+    def test_missing_confirmed_at_does_not_infer_email_verified(self):
+        """Email presence alone must not durable-upgrade email_verified."""
+        mgr = SupabaseClientManager()
+        user_id = str(uuid.uuid4())
+        result = mgr._claims_to_user_dict(
+            "tok",
+            {
+                "sub": user_id,
+                "email": "user@example.com",
+                "phone": "+919876543210",
+                "role": "authenticated",
+                "app_metadata": {"providers": ["email", "phone"]},
+                "user_metadata": {},
+            },
+        )
+        assert result is not None
+        # Email is never inferred from role + presence (unconfirmed addresses
+        # commonly appear on tokens and must not flip durable email_verified).
+        assert result["email_verified"] is False
+        # Phone OTP provider + phone present may treat phone as verified.
+        assert result["phone_verified"] is True
+        # Raw confirmed_at stays absent so email-column linking stays strict.
+        assert result["email_confirmed_at"] is None
+        assert result["phone_confirmed_at"] is None
+
+    def test_email_only_provider_without_confirmed_at_is_not_verified(self):
+        mgr = SupabaseClientManager()
+        user_id = str(uuid.uuid4())
+        result = mgr._claims_to_user_dict(
+            "tok",
+            {
+                "sub": user_id,
+                "email": "user@example.com",
+                "phone": None,
+                "role": "authenticated",
+                "app_metadata": {"providers": ["email"], "provider": "email"},
+                "user_metadata": {},
+            },
+        )
+        assert result is not None
+        assert result["email_verified"] is False
+        assert result["phone_verified"] is False
+
+    def test_explicit_confirmed_at_wins(self):
+        mgr = SupabaseClientManager()
+        user_id = str(uuid.uuid4())
+        result = mgr._claims_to_user_dict(
+            "tok",
+            {
+                "sub": user_id,
+                "email": "user@example.com",
+                "phone": "+919876543210",
+                "role": "authenticated",
+                "email_confirmed_at": "2025-01-01T00:00:00Z",
+                "phone_confirmed_at": None,
+                "app_metadata": {"providers": ["email"]},
+                "user_metadata": {},
+            },
+        )
+        assert result is not None
+        assert result["email_verified"] is True
+        # phone_confirmed_at is null and no phone provider → not verified.
+        assert result["phone_verified"] is False
+
+    def test_phone_provider_infers_phone_verified_without_confirmed_at(self):
+        mgr = SupabaseClientManager()
+        user_id = str(uuid.uuid4())
+        result = mgr._claims_to_user_dict(
+            "tok",
+            {
+                "sub": user_id,
+                "email": None,
+                "phone": "+919876543210",
+                "role": "authenticated",
+                "app_metadata": {"providers": ["phone"], "provider": "phone"},
+                "user_metadata": {},
+            },
+        )
+        assert result is not None
+        assert result["phone_verified"] is True
+        assert result["email_verified"] is False
+
+    def test_explicit_email_verified_claim_used_when_confirmed_at_absent(self):
+        mgr = SupabaseClientManager()
+        user_id = str(uuid.uuid4())
+        result = mgr._claims_to_user_dict(
+            "tok",
+            {
+                "sub": user_id,
+                "email": "user@example.com",
+                "phone": None,
+                "role": "authenticated",
+                "email_verified": False,
+                "app_metadata": {},
+                "user_metadata": {},
+            },
+        )
+        assert result is not None
+        # Explicit claim is honored (False stays False).
+        assert result["email_verified"] is False
+

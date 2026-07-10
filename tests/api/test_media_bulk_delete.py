@@ -131,3 +131,24 @@ async def test_batch_delete_partial_success(
     data = response.json()
     assert data["deleted"] == [owned[0].id]
     assert data["failed"] == [others[0].id]
+
+
+@patch("app.api.api_v1.endpoints.upload.storage_service.delete_file", return_value=True)
+async def test_batch_delete_by_url_echoes_requested_url(
+    _mock_delete,
+    db_session: AsyncSession,
+    authenticated_client: AsyncClient,
+    test_user,
+):
+    owned = await _make_media(db_session, test_user.id, count=1)
+    url = owned[0].file_url
+
+    response = await authenticated_client.post(
+        "/api/v1/upload/media/batch-delete",
+        json={"media_ids": [url]},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    # Client requested a URL — response should echo that URL, not only media.id.
+    assert data["deleted"] == [url]
+    assert data["failed"] == []

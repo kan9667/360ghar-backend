@@ -14,9 +14,23 @@ from app.core.db_resilience import apply_statement_timeout, execute_with_transie
 from app.core.logging import get_logger
 from app.models.enums import PG_FLATMATE_TYPES
 from app.models.properties import Property, PropertyAmenity
-from app.models.users import UserSwipe
+from app.models.users import User, UserSwipe
 from app.schemas.pagination import offset_payload, read_offset
 from app.schemas.property import Property as PropertySchema
+from app.services.flatmates.compatibility import (
+    calculate_property_compatibility_score,
+    user_has_lifestyle_profile,
+)
+
+_OWNER_COMPAT_LOAD_ONLY = (
+    User.id,
+    User.flatmates_sleep_schedule,
+    User.flatmates_cleanliness,
+    User.flatmates_food_habits,
+    User.flatmates_smoking_drinking,
+    User.flatmates_guests_policy,
+    User.flatmates_work_style,
+)
 
 logger = get_logger(__name__)
 
@@ -121,12 +135,19 @@ async def get_property_recommendations(
                 logger.debug("Preference-signal lookup failed for user %s: %s", user_id, exc)
 
         base_filters = [Property.is_available, availability_filter]
+        current_user = await db.get(User, user_id) if user_id else None
+        score_compatibility = user_has_lifestyle_profile(current_user)
+        query_options = [
+            selectinload(Property.images),
+            selectinload(Property.property_amenities).selectinload(PropertyAmenity.amenity),
+        ]
+        if score_compatibility:
+            query_options.append(
+                selectinload(Property.owner).load_only(*_OWNER_COMPAT_LOAD_ONLY)
+            )
         query = (
             select(Property)
-            .options(
-                selectinload(Property.images),
-                selectinload(Property.property_amenities).selectinload(PropertyAmenity.amenity),
-            )
+            .options(*query_options)
             .where(*base_filters)
             .offset(skip)
             .limit(limit + 1)
@@ -171,7 +192,19 @@ async def get_property_recommendations(
             properties = properties[:limit]
         next_payload: dict | None = offset_payload(skip + limit) if has_more else None
 
-        schemas = [PropertySchema.model_validate(prop) for prop in properties]
+        schemas = []
+        for prop in properties:
+            schema = PropertySchema.model_validate(prop)
+            if (
+                score_compatibility
+                and current_user is not None
+                and prop.owner_id is not None
+                and prop.owner_id != current_user.id
+            ):
+                schema.compatibility_score = calculate_property_compatibility_score(
+                    current_user, prop.owner
+                )
+            schemas.append(schema)
 
         # Cache anonymous first-page results
         if user_id is None and skip == 0:

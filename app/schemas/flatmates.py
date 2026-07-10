@@ -24,6 +24,7 @@ from app.models.enums import (
     VisitStatus,
     WorkStyle,
 )
+from app.schemas.property import Property as PropertySchema
 
 
 class DiscoverProfilesQuery(BaseModel):
@@ -154,6 +155,7 @@ class FlatmatesPeer(BaseModel):
     has_pets: bool = False
     party_habit: str | None = None
     match_percentage: float | None = None
+    top_matches: list[str] = Field(default_factory=list)
     phone_number: str | None = None
 
 
@@ -238,6 +240,15 @@ class MatchSummary(BaseModel):
 class IncomingLikeSummary(BaseModel):
     id: int
     peer: FlatmatesPeer
+    context_property: ConversationPropertyContext | None = None
+    created_at: datetime
+
+
+class OutgoingLikeSummary(BaseModel):
+    id: int
+    target_type: SwipeTargetType
+    peer: FlatmatesPeer | None = None
+    property: PropertySchema | None = None
     context_property: ConversationPropertyContext | None = None
     created_at: datetime
 
@@ -402,3 +413,26 @@ class ReportModerationAction(BaseModel):
     """Payload for moderating a user report (dismiss, warn, suspend, or escalate)."""
     action: Literal["dismiss", "warn_user", "suspend_user", "escalate"]
     notes: str = ""
+
+
+class CompatibilityDimension(BaseModel):
+    """Single dimension in a compatibility breakdown."""
+
+    name: str
+    weight: float
+    user_value: str | None = None
+    peer_value: str | None = None
+    score: float
+    match: bool
+    summary: str
+
+
+class CompatibilityBreakdown(BaseModel):
+    """Full compatibility breakdown between the current user and a peer."""
+
+    user_id: int
+    peer_id: int
+    overall_percentage: float | None = None
+    color: Literal["green", "amber", "red"]
+    dimensions: list[CompatibilityDimension]
+    summary: list[str] = Field(default_factory=list)

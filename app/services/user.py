@@ -22,6 +22,7 @@ from app.models.enums import AuthMethod, FlatmatesProfileStatus, UserRole
 from app.models.users import User
 from app.schemas.pagination import keyset_filter, keyset_payload, keyset_sort_value
 from app.schemas.user import UserUpdate
+from app.services.auth_user_cache import invalidate_auth_user
 from app.utils.validators import ValidationUtils
 
 logger = get_logger(__name__)
@@ -124,6 +125,34 @@ async def get_user_by_supabase_id(db: AsyncSession, supabase_user_id: str) -> Us
         raise
 
 
+
+async def _upgrade_user_from_supabase_payload(
+    db: AsyncSession,
+    user: User,
+    *,
+    email_verified: bool,
+    phone_verified: bool,
+) -> User:
+    """Upgrade verification flags from token payload; never downgrade.
+
+    JWTs often omit confirmed_at, so we only set flags True when the payload
+    indicates verified. Missing claims must not reset verified→False.
+    """
+    updated = False
+    if email_verified and not user.email_verified:
+        user.email_verified = True
+        updated = True
+    if phone_verified and not user.phone_verified:
+        user.phone_verified = True
+        updated = True
+    if (user.email_verified or user.phone_verified) and not user.is_verified:
+        user.is_verified = True
+        updated = True
+    if updated:
+        await db.flush()
+    return user
+
+
 async def get_or_create_user_from_supabase(
     db: AsyncSession, supabase_user_data: dict[str, Any]
 ) -> User:
@@ -131,7 +160,7 @@ async def get_or_create_user_from_supabase(
 
     Email is the canonical linking key (email-linked, multi-method identity).
     Precedence:
-      1. Find by ``supabase_user_id`` → return as-is.
+      1. Find by ``supabase_user_id`` → upgrade verification flags if needed, return.
       2. Fallback dedup by VERIFIED email only (only when the incoming token's
          ``email_confirmed_at`` is set), then by ``phone``.
       3. No match → create a new user.
@@ -168,6 +197,15 @@ async def get_or_create_user_from_supabase(
         if supabase_id:
             user = await get_user_by_supabase_id(db, supabase_id)
             if user and user.is_active:
+                # Still upgrade verification flags when the token advances them
+                # (e.g. email confirmed after initial phone signup). Never
+                # downgrade when claims omit confirmed_at.
+                await _upgrade_user_from_supabase_payload(
+                    db,
+                    user,
+                    email_verified=email_verified,
+                    phone_verified=phone_verified,
+                )
                 logger.debug("User already exists with ID %s", user.id)
                 return user
 
@@ -191,6 +229,12 @@ async def get_or_create_user_from_supabase(
         user = await get_user_by_supabase_id(db, supabase_id)
 
         if user and user.is_active:
+            await _upgrade_user_from_supabase_payload(
+                db,
+                user,
+                email_verified=email_verified,
+                phone_verified=phone_verified,
+            )
             logger.debug("User already exists with ID %s", user.id)
             return user
 
@@ -475,6 +519,10 @@ async def delete_user_account(db: AsyncSession, user: User) -> None:
     user.estate_onboarding_completed = False
     user.ghar360_onboarding_completed = False
     await db.flush()
+    # Drop any short-lived auth snapshot so deleted users cannot keep serving
+    # as authenticated via the auth-user cache.
+    if supabase_user_id and not str(supabase_user_id).startswith("__deleted__"):
+        await invalidate_auth_user(str(supabase_user_id))
     logger.info(
         "User %s account deleted (Supabase auth user removed, local PII anonymized)",
         user.id,

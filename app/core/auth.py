@@ -299,11 +299,46 @@ class SupabaseClientManager:
         email_confirmed_at = claims.get("email_confirmed_at")
         phone_confirmed_at = claims.get("phone_confirmed_at")
 
-        # email_verified tracks email confirmation ONLY; phone_verified tracks
-        # phone confirmation.  The aggregate "is the user verified at all?" is
-        # computed downstream (user.is_verified) from either channel.
-        email_verified = bool(email_confirmed_at)
-        phone_verified = bool(phone_confirmed_at)
+        # email_verified / phone_verified feed durable DB upgrades (True-only,
+        # never downgraded). Never infer email verification from role + email
+        # presence — an unconfirmed address often appears on the token and must
+        # not permanently flip ``users.email_verified``.
+        #
+        # Prefer in order:
+        #   1) explicit ``*_confirmed_at``
+        #   2) explicit ``*_verified`` claim when present
+        #   3) phone only: authenticated token with a linked ``phone`` provider
+        #      (phone OTP implies the number was confirmed; email does not)
+        # ``email_confirmed_at`` remains the sole gate for email-column linking
+        # in get_or_create_user_from_supabase (we still pass the raw claim).
+        role = claims.get("role")
+        providers_raw = app_metadata.get("providers")
+        providers: list[str] = (
+            [p for p in providers_raw if isinstance(p, str)]
+            if isinstance(providers_raw, list)
+            else []
+        )
+        primary_provider = app_metadata.get("provider")
+        has_phone_provider = (
+            "phone" in providers
+            or (isinstance(primary_provider, str) and primary_provider == "phone")
+        )
+
+        if email_confirmed_at is not None:
+            email_verified = bool(email_confirmed_at)
+        elif "email_verified" in claims:
+            email_verified = bool(claims.get("email_verified"))
+        else:
+            email_verified = False
+
+        if phone_confirmed_at is not None:
+            phone_verified = bool(phone_confirmed_at)
+        elif "phone_verified" in claims:
+            phone_verified = bool(claims.get("phone_verified"))
+        elif role == "authenticated" and bool(phone) and has_phone_provider:
+            phone_verified = True
+        else:
+            phone_verified = False
 
         # The identities array is only present in the introspection response,
         # not in the JWT claims.  Derive a minimal identities list from

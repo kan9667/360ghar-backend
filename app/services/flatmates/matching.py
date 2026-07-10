@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -18,10 +18,10 @@ from app.models.enums import (
     SwipeTargetType,
     UserMatchStatus,
 )
-from app.models.properties import Property
+from app.models.properties import Property, PropertyAmenity
 from app.models.social import UserBlock, UserMatch
 from app.models.users import User, UserSwipe
-from app.schemas.flatmates import SwipeRequest
+from app.schemas.flatmates import PropertySchema, SwipeRequest
 from app.schemas.pagination import keyset_filter, keyset_payload, keyset_sort_value
 from app.services.flatmates.conversations import _ensure_conversation
 from app.services.flatmates.helpers import (
@@ -32,6 +32,7 @@ from app.services.flatmates.helpers import (
     _is_blocked,
 )
 from app.services.flatmates.realtime import EVENT_NEW_MATCH, queue_flatmates_realtime_event
+from app.services.swipe import _upsert_user_swipe
 
 logger = get_logger(__name__)
 
@@ -64,28 +65,16 @@ async def record_swipe(
         if await _is_blocked(db, user_id, property_obj.owner_id):
             raise BadRequestException(detail="Conversation is blocked")
 
-        stmt = select(UserSwipe).where(
-            UserSwipe.user_id == user_id,
-            UserSwipe.property_id == payload.property_id,
+        _, was_liked, _ = await _upsert_user_swipe(
+            db,
+            user_id,
+            property_id=payload.property_id,
+            target_user_id=None,
+            context_property_id=payload.context_property_id,
+            target_type=payload.target_type.value,
+            swipe_action=payload.action.value,
+            is_liked=is_liked,
         )
-        existing = (await db.execute(stmt)).scalar_one_or_none()
-        was_liked = existing.is_liked if existing else False
-        if existing:
-            existing.target_type = payload.target_type.value
-            existing.swipe_action = payload.action.value
-            existing.is_liked = is_liked
-            existing.context_property_id = payload.context_property_id
-        else:
-            db.add(
-                UserSwipe(
-                    user_id=user_id,
-                    property_id=payload.property_id,
-                    target_type=payload.target_type.value,
-                    swipe_action=payload.action.value,
-                    context_property_id=payload.context_property_id,
-                    is_liked=is_liked,
-                )
-            )
 
         conversation_id = None
         if is_liked:
@@ -98,8 +87,19 @@ async def record_swipe(
                 context_property_id=payload.property_id,
             )
             conversation_id = conversation.id
-            if not was_liked:
-                property_obj.interest_count = (property_obj.interest_count or 0) + 1
+
+        if is_liked and not was_liked:
+            await db.execute(
+                update(Property)
+                .where(Property.id == property_obj.id)
+                .values(interest_count=func.coalesce(Property.interest_count, 0) + 1)
+            )
+        elif was_liked and not is_liked:
+            await db.execute(
+                update(Property)
+                .where(Property.id == property_obj.id)
+                .values(interest_count=func.greatest(func.coalesce(Property.interest_count, 0) - 1, 0))
+            )
 
         await db.flush()
         await db.commit()
@@ -120,27 +120,16 @@ async def record_swipe(
     if await _is_blocked(db, user_id, target_user.id):
         raise BadRequestException(detail="Conversation is blocked")
 
-    stmt = select(UserSwipe).where(
-        UserSwipe.user_id == user_id,
-        UserSwipe.target_user_id == payload.target_user_id,
+    await _upsert_user_swipe(
+        db,
+        user_id,
+        property_id=None,
+        target_user_id=payload.target_user_id,
+        context_property_id=payload.context_property_id,
+        target_type=payload.target_type.value,
+        swipe_action=payload.action.value,
+        is_liked=is_liked,
     )
-    existing = (await db.execute(stmt)).scalar_one_or_none()
-    if existing:
-        existing.target_type = payload.target_type.value
-        existing.swipe_action = payload.action.value
-        existing.is_liked = is_liked
-        existing.context_property_id = payload.context_property_id
-    else:
-        db.add(
-            UserSwipe(
-                user_id=user_id,
-                target_user_id=payload.target_user_id,
-                target_type=payload.target_type.value,
-                swipe_action=payload.action.value,
-                context_property_id=payload.context_property_id,
-                is_liked=is_liked,
-            )
-        )
 
     did_match = False
     match_id = None
@@ -319,16 +308,32 @@ async def list_outgoing_likes(
         UserBlock.blocked_user_id == user_id,
     )
     _payload: dict[str, Any] = cursor_payload if cursor_payload is not None else {}
+    property_load = selectinload(UserSwipe.property)
     base_stmt = (
         select(UserSwipe)
-        .options(selectinload(UserSwipe.target_user), selectinload(UserSwipe.context_property))
+        .options(
+            selectinload(UserSwipe.target_user),
+            selectinload(UserSwipe.context_property),
+            property_load.selectinload(Property.images),
+            property_load.selectinload(Property.property_amenities).selectinload(PropertyAmenity.amenity),
+        )
         .where(
             UserSwipe.user_id == user_id,
-            UserSwipe.target_type == SwipeTargetType.user.value,
             UserSwipe.is_liked.is_(True),
-            UserSwipe.target_user_id.is_not(None),
-            ~UserSwipe.target_user_id.in_(blocked_subq),
-            ~UserSwipe.target_user_id.in_(blocker_subq),
+            or_(
+                and_(
+                    UserSwipe.target_type == SwipeTargetType.user.value,
+                    UserSwipe.target_user_id.is_not(None),
+                    ~UserSwipe.target_user_id.in_(blocked_subq),
+                    ~UserSwipe.target_user_id.in_(blocker_subq),
+                ),
+                and_(
+                    UserSwipe.target_type == SwipeTargetType.property.value,
+                    UserSwipe.property_id.is_not(None),
+                    UserSwipe.property.has(~Property.owner_id.in_(blocked_subq)),
+                    UserSwipe.property.has(~Property.owner_id.in_(blocker_subq)),
+                ),
+            ),
         )
     )
     count_total: int | None = None
@@ -350,16 +355,32 @@ async def list_outgoing_likes(
 
     items: list[dict[str, Any]] = []
     for swipe in outgoing_swipes:
-        if swipe.target_user is None:
-            continue
-        items.append(
-            {
-                "id": swipe.id,
-                "peer": _build_peer_payload(swipe.target_user, current_user),
-                "context_property": _build_property_context(swipe.context_property),
-                "created_at": swipe.created_at,
-            }
-        )
+        if swipe.target_type == SwipeTargetType.user.value:
+            if swipe.target_user is None:
+                continue
+            items.append(
+                {
+                    "id": swipe.id,
+                    "target_type": SwipeTargetType.user.value,
+                    "peer": _build_peer_payload(swipe.target_user, current_user),
+                    "context_property": _build_property_context(swipe.context_property),
+                    "created_at": swipe.created_at,
+                }
+            )
+        else:
+            if swipe.property is None:
+                continue
+            property_schema = PropertySchema.model_validate(
+                swipe.property, from_attributes=True
+            ).model_copy(update={"liked": True})
+            items.append(
+                {
+                    "id": swipe.id,
+                    "target_type": SwipeTargetType.property.value,
+                    "property": property_schema,
+                    "created_at": swipe.created_at,
+                }
+            )
     return items, next_payload, count_total
 
 

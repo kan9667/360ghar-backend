@@ -11702,6 +11702,65 @@
         }
       }
     },
+    "/api/v1/flatmates/profiles/{user_id}/compatibility": {
+      "get": {
+        "tags": [
+          "flatmates"
+        ],
+        "summary": "Get compatibility breakdown with a flatmate",
+        "description": "Return the full compatibility breakdown between the current user and the peer.",
+        "operationId": "get_user_compatibility_api_v1_flatmates_profiles__user_id__compatibility_get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompatibilityBreakdown"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/flatmates/profiles": {
       "get": {
         "tags": [
@@ -12164,7 +12223,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CursorPage_IncomingLikeSummary_"
+                  "$ref": "#/components/schemas/CursorPage_OutgoingLikeSummary_"
                 }
               }
             }
@@ -32558,6 +32617,119 @@
         ],
         "title": "ColonyApprovalResponse"
       },
+      "CompatibilityBreakdown": {
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "peer_id": {
+            "type": "integer",
+            "title": "Peer Id"
+          },
+          "overall_percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overall Percentage",
+            "default": null,
+            "description": "Weighted score over comparable dimensions; null when no dimensions are comparable."
+          },
+          "color": {
+            "type": "string",
+            "enum": [
+              "green",
+              "amber",
+              "red"
+            ],
+            "title": "Color"
+          },
+          "dimensions": {
+            "items": {
+              "$ref": "#/components/schemas/CompatibilityDimension"
+            },
+            "type": "array",
+            "title": "Dimensions"
+          },
+          "summary": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Summary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "peer_id",
+          "color",
+          "dimensions"
+        ],
+        "title": "CompatibilityBreakdown",
+        "description": "Full compatibility breakdown between the current user and a peer."
+      },
+      "CompatibilityDimension": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "weight": {
+            "type": "number",
+            "title": "Weight"
+          },
+          "user_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Value"
+          },
+          "peer_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peer Value"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "match": {
+            "type": "boolean",
+            "title": "Match"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "weight",
+          "score",
+          "match",
+          "summary"
+        ],
+        "title": "CompatibilityDimension",
+        "description": "Single dimension in a compatibility breakdown."
+      },
       "ComplaintNature": {
         "type": "string",
         "enum": [
@@ -34310,6 +34482,54 @@
           "limit"
         ],
         "title": "CursorPage[NotificationLogEntry]"
+      },
+      "CursorPage_OutgoingLikeSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OutgoingLikeSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More",
+            "default": false
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "limit"
+        ],
+        "title": "CursorPage[OutgoingLikeSummary]"
       },
       "CursorPage_PageResponse_": {
         "properties": {
@@ -36756,6 +36976,13 @@
               }
             ],
             "title": "Match Percentage"
+          },
+          "top_matches": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Top Matches"
           },
           "phone_number": {
             "anyOf": [
@@ -41315,6 +41542,59 @@
         ],
         "title": "OccupancyReport"
       },
+      "OutgoingLikeSummary": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "target_type": {
+            "$ref": "#/components/schemas/SwipeTargetType"
+          },
+          "peer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FlatmatesPeer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "property": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Property"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "context_property": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationPropertyContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "target_type",
+          "created_at"
+        ],
+        "title": "OutgoingLikeSummary"
+      },
       "OwnerRMAssignmentCreate": {
         "properties": {
           "owner_user_id": {
@@ -43045,6 +43325,17 @@
               }
             ],
             "title": "Relevance Score"
+          },
+          "compatibility_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compatibility Score"
           },
           "user_has_scheduled_visit": {
             "anyOf": [

@@ -13,6 +13,7 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
 
 from app.config import settings
+from app.core.db_resilience import apply_statement_timeout
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -124,15 +125,19 @@ _validate_database_pooler_config(
 # Log database connection info
 logger.info("Connecting to database with psycopg for PgBouncer compatibility")
 
-# Shared connection args for PgBouncer compatibility
+# Shared connection args for PgBouncer compatibility.
+# connect_timeout (seconds) fails hung TCP/pooler handshakes before the
+# Supavisor default 60s ECHECKOUTTIMEOUT where the OS would otherwise wait.
 _connect_args = {
     "application_name": "360ghar_backend",
     "prepare_threshold": None,  # Disable prepared statements for PgBouncer
+    "connect_timeout": 10,
 }
 
 _bg_connect_args = {
     "application_name": "360ghar_bg",
     "prepare_threshold": None,
+    "connect_timeout": 10,
 }
 
 # ── Serverless: NullPool prevents persistent connections that generate ────────
@@ -264,6 +269,13 @@ AsyncSessionLocalBG = async_sessionmaker(
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         session_start = time.monotonic()
+        # Bound every request transaction so a stalled query (or a path that
+        # forgot its own apply_statement_timeout) fails fast and frees the
+        # Supavisor slot instead of holding until the 2-minute server default.
+        # Per-service calls may override with a later SET LOCAL.
+        # Note: SET LOCAL ends on commit — auth deps re-apply after their
+        # mid-request commit (see app/api/api_v1/dependencies/auth.py).
+        await apply_statement_timeout(session, settings.DB_READ_STATEMENT_TIMEOUT_MS)
         try:
             yield session
         except HTTPException:
@@ -296,8 +308,11 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         finally:
             hold_time = time.monotonic() - session_start
             if hold_time > _SESSION_HOLD_WARN_S:
+                # Includes pooler checkout wait under NullPool/serverless, so
+                # this is "session lifetime" not necessarily a code-level leak.
                 logger.warning(
-                    "DB session held for %.1fs — possible connection leak",
+                    "DB session lifetime %.1fs (includes pooler checkout wait) — "
+                    "investigate slow queries or pool saturation",
                     hold_time,
                     stack_info=True,
                 )

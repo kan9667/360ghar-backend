@@ -97,19 +97,26 @@ async def flatmates_client(test_app, viewer_user) -> AsyncClient:
     """Authenticated ASGI client wired to viewer_user."""
     from app.api.api_v1.dependencies.auth import (
         get_current_active_user,
+        get_current_cached_active_user,
         get_current_user,
         get_current_user_optional,
     )
     from app.schemas.user import User as UserSchema
+    from app.services.auth_user_cache import snapshot_from_user
 
     schema = UserSchema.model_validate(viewer_user, from_attributes=True)
+    snapshot = snapshot_from_user(viewer_user)
 
     async def _get_user() -> UserSchema:
         return schema
 
+    async def _get_cached_user():
+        return snapshot
+
     test_app.dependency_overrides[get_current_user] = _get_user
     test_app.dependency_overrides[get_current_active_user] = _get_user
     test_app.dependency_overrides[get_current_user_optional] = _get_user
+    test_app.dependency_overrides[get_current_cached_active_user] = _get_cached_user
 
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://test", timeout=60.0) as ac:
@@ -405,6 +412,86 @@ async def test_outgoing_likes_invalid_cursor_400(flatmates_client: AsyncClient) 
     r = await flatmates_client.get("/api/v1/flatmates/outgoing-likes?cursor=garbage!!!")
     assert r.status_code == 400, r.text
     assert r.json()["error"]["code"] == "INVALID_CURSOR"
+
+
+@pytest_asyncio.fixture
+async def mixed_outgoing_likes(db_session, viewer_user) -> tuple[UserSwipe, UserSwipe]:
+    """Seed one outgoing property like and one outgoing user like for viewer_user."""
+    owner = _make_user("property_owner")
+    db_session.add(owner)
+    await db_session.flush()
+    await db_session.refresh(owner)
+
+    property_obj = Property(
+        title="Test liked property",
+        property_type=PropertyType.apartment,
+        purpose=PropertyPurpose.rent,
+        base_price=1_000_000,
+        monthly_rent=25000,
+        owner_id=owner.id,
+        is_available=True,
+        listing_preferences={"moderation_status": "live"},
+    )
+    db_session.add(property_obj)
+    await db_session.flush()
+    await db_session.refresh(property_obj)
+
+    user_target = _make_user("liked_user", flatmates=True)
+    db_session.add(user_target)
+    await db_session.flush()
+    await db_session.refresh(user_target)
+
+    property_swipe = UserSwipe(
+        user_id=viewer_user.id,
+        property_id=property_obj.id,
+        target_type=SwipeTargetType.property.value,
+        swipe_action=SwipeAction.like.value,
+        is_liked=True,
+    )
+    db_session.add(property_swipe)
+    await db_session.flush()
+    await db_session.refresh(property_swipe)
+
+    user_swipe = UserSwipe(
+        user_id=viewer_user.id,
+        target_user_id=user_target.id,
+        target_type=SwipeTargetType.user.value,
+        swipe_action=SwipeAction.like.value,
+        is_liked=True,
+    )
+    db_session.add(user_swipe)
+    await db_session.flush()
+    await db_session.refresh(user_swipe)
+
+    return property_swipe, user_swipe
+
+
+async def test_outgoing_likes_mixed_returns_property_and_user(
+    flatmates_client: AsyncClient,
+    mixed_outgoing_likes: tuple[UserSwipe, UserSwipe],
+) -> None:
+    r = await flatmates_client.get("/api/v1/flatmates/outgoing-likes?limit=10")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["items"]) == 2
+
+    target_types = {item["target_type"] for item in body["items"]}
+    assert target_types == {"user", "property"}
+
+    property_item = next(
+        (item for item in body["items"] if item["target_type"] == "property"),
+        None,
+    )
+    assert property_item is not None
+    assert property_item["property"]["id"] == mixed_outgoing_likes[0].property_id
+    assert property_item["property"]["liked"] is True
+
+    user_item = next(
+        (item for item in body["items"] if item["target_type"] == "user"),
+        None,
+    )
+    assert user_item is not None
+    assert user_item["peer"]["id"] == mixed_outgoing_likes[1].target_user_id
 
 
 # ---------------------------------------------------------------------------

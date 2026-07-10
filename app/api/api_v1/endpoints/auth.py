@@ -194,7 +194,10 @@ async def link_identity(
                 detail="Identity provider is temporarily unreachable, please retry",
                 headers={"Retry-After": "30"},
             )
-        raise BadRequestException(detail="Identity provider is temporarily unreachable")
+        # Non-transient failures (invalid token, already linked, provider error).
+        raise BadRequestException(
+            detail="Failed to link identity. The account may already be linked or the token is invalid."
+        )
     if not linked:
         raise BadRequestException(
             detail="Failed to link identity. The account may already be linked or the token is invalid."

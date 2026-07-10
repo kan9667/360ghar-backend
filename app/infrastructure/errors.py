@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.config import settings
+from app.core.db_resilience import is_retryable_read_db_error, read_db_error_code
 from app.core.exceptions import BaseAPIException
 from app.core.logging import get_logger
 
@@ -150,7 +151,44 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def general_exception_handler(request, exc: Exception):
-        """Handle unexpected exceptions and hide details unless DEBUG is on."""
+        """Handle unexpected exceptions and hide details unless DEBUG is on.
+
+        Transient DB / pooler failures (ECHECKOUTTIMEOUT, EDBHANDLEREXITED,
+        statement timeouts) are mapped to 503 so clients retry instead of
+        treating them as application bugs. That also avoids retry storms from
+        hard-failing 500 responses during pool saturation.
+        """
+        if is_retryable_read_db_error(exc):
+            error_code = read_db_error_code(exc)
+            logger.error(
+                "Transient DB failure: %s - %s %s",
+                exc,
+                request.method,
+                request.url.path,
+                exc_info=True,
+                extra={
+                    "endpoint": str(request.url.path),
+                    "error_code": error_code,
+                },
+            )
+            # Still capture in Sentry — pool exhaustion is actionable — but
+            # return a retryable status to the client.
+            sentry_sdk.capture_exception(exc)
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": {
+                        "code": "SERVICE_UNAVAILABLE",
+                        "message": "Service temporarily unavailable. Please retry.",
+                        "details": {
+                            "error_code": error_code,
+                            "endpoint": str(request.url.path),
+                        },
+                    }
+                },
+                headers={"Retry-After": "5"},
+            )
+
         logger.error(
             "Unexpected error: %s - %s %s", exc, request.method, request.url.path, exc_info=True
         )
