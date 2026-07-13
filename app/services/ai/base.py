@@ -103,15 +103,15 @@ def _parse_retry_after_seconds(headers: httpx.Headers | dict[str, str], body: st
         except (TypeError, ValueError):
             pass
 
-    # Prefer multi-hour usage window over naive "reset at" timestamps (TZ-ambiguous).
-    # When both are present, take the shorter positive delay so we do not
-    # over-cool beyond the actual reset when the window is an upper bound.
+    # Prefer the multi-hour usage window over a naive "reset at" timestamp:
+    # the window has no timezone ambiguity, while comparing the provider's
+    # naive wall-clock timestamp against our own naive datetime.now() can be
+    # off by hours when the two run in different timezones.
     hours_delay = _parse_hours_window_seconds(body)
-    reset_delay = _parse_reset_at_delta_seconds(body)
-    if hours_delay is not None and reset_delay is not None:
-        return min(hours_delay, reset_delay)
     if hours_delay is not None:
         return hours_delay
+
+    reset_delay = _parse_reset_at_delta_seconds(body)
     if reset_delay is not None:
         return reset_delay
 

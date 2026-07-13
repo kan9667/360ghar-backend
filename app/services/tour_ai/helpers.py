@@ -263,7 +263,7 @@ async def _ensure_navigation_hotspots(
 async def _download_image_as_base64(url: str) -> tuple[str, str]:
     """Download an image and convert to base64."""
     from app.core.http import get_general_client
-    from app.services.image_processing import get_image_dimensions
+    from app.services.image_processing import validate_image_decodes
 
     client = get_general_client()
     response = await client.get(url, timeout=60.0)
@@ -272,7 +272,7 @@ async def _download_image_as_base64(url: str) -> tuple[str, str]:
     # The content-type header alone is not reliable evidence of a decodable
     # image (redirects, stale/corrupted stored files, transcoding failures).
     try:
-        get_image_dimensions(response.content)
+        validate_image_decodes(response.content)
     except Exception as exc:
         raise ValueError(f"Downloaded image at {url} is not a valid image: {exc}") from exc
 

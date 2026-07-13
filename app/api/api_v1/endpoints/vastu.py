@@ -17,7 +17,7 @@ from app.services.ai.vastu import (
     VastuAnalyzeResponse,
     analyze_vastu,
 )
-from app.services.image_processing import get_image_dimensions
+from app.services.image_processing import validate_image_decodes
 
 logger = get_logger(__name__)
 
@@ -87,7 +87,7 @@ async def analyze_floor_plan(
     # Content-Type header is client-supplied and unreliable; confirm the
     # bytes actually decode before spending an AI provider call on them.
     try:
-        get_image_dimensions(content)
+        validate_image_decodes(content)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

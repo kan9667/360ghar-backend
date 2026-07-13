@@ -9,7 +9,10 @@ from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.constants import DEFAULT_VISION_PROVIDER
+from app.core.logging import get_logger
 from app.core.utils import utc_now_iso
+
+logger = get_logger(__name__)
 
 
 class NorthDirection(str, Enum):
@@ -124,7 +127,9 @@ def _coerce_string_list_item(item: object) -> str | None:
         for value in item.values():
             if isinstance(value, str) and value.strip():
                 return value.strip()
+        logger.warning("Dropping unrecognized dict item from AI string-list field: %r", item)
         return None
+    logger.warning("Stringifying unexpected non-string list item from AI response: %r", item)
     text = str(item).strip()
     return text or None
 

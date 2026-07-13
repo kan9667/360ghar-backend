@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -12,6 +13,16 @@ from app.services.ai.base import (
     _parse_retry_after_seconds,
     clear_provider_cooldowns,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_cooldowns():
+    """Prevent hard-quota cooldown state from leaking across tests, even on failure."""
+    clear_provider_cooldowns()
+    try:
+        yield
+    finally:
+        clear_provider_cooldowns()
 
 
 class _DummyProvider(AIProvider):
@@ -65,12 +76,21 @@ class TestRetryAfterParsing:
         assert delay is not None
         assert delay >= 60
 
-    def test_glm_prefers_shorter_of_hours_window_and_reset(self):
-        # When reset is far in the future past the stated window, use the window.
+    def test_glm_prefers_hours_window_over_reset_timestamp(self):
+        # The hours window has no timezone ambiguity; always prefer it over
+        # the naive "reset at" timestamp when both are present.
         body = (
             "Usage limit reached for 5 hour. "
             "Your limit will reset at 2099-01-01 00:00:00"
         )
+        delay = _parse_retry_after_seconds({}, body)
+        assert delay == pytest.approx(5 * 3600.0)
+
+    def test_glm_hours_window_wins_over_sooner_reset_timestamp(self):
+        # A TZ-skewed "reset at" timestamp that lands sooner than the stated
+        # window must not shorten the trusted, unambiguous window.
+        reset_soon = (datetime.now() + timedelta(minutes=90)).strftime("%Y-%m-%d %H:%M:%S")
+        body = f"Usage limit reached for 5 hour. Your limit will reset at {reset_soon}"
         delay = _parse_retry_after_seconds({}, body)
         assert delay == pytest.approx(5 * 3600.0)
 
@@ -127,7 +147,6 @@ class TestIsRetryableError:
 
 @pytest.mark.asyncio
 async def test_make_request_fail_fast_on_hard_quota():
-    clear_provider_cooldowns()
     provider = _DummyProvider(AIProviderConfig(api_key="test", model="dummy"))
 
     glm_body = (
@@ -157,12 +176,9 @@ async def test_make_request_fail_fast_on_hard_quota():
     assert cooled.value.retryable is False
     assert client.post.await_count == 0
 
-    clear_provider_cooldowns()
-
 
 @pytest.mark.asyncio
 async def test_make_request_retries_soft_503():
-    clear_provider_cooldowns()
     provider = _DummyProvider(AIProviderConfig(api_key="test", model="dummy"))
 
     fail = MagicMock(spec=httpx.Response)
@@ -181,5 +197,3 @@ async def test_make_request_retries_soft_503():
     result = await provider._make_request(client, "https://example.com", {}, {})
     assert result.status_code == 200
     assert client.post.await_count == 2
-
-    clear_provider_cooldowns()

@@ -376,6 +376,23 @@ def get_image_dimensions(image_bytes: bytes) -> tuple[int, int]:
         raise
 
 
+def validate_image_decodes(image_bytes: bytes) -> None:
+    """
+    Raise if the bytes are not a fully decodable image.
+
+    Unlike ``get_image_dimensions``, this forces PIL to decode pixel data
+    (``img.load()``), not just parse the header. ``Image.open().size``
+    succeeds on a truncated file with an intact header — this catches that.
+
+    Raises:
+        Exception: if the image cannot be fully decoded.
+    """
+    from PIL import Image
+
+    with Image.open(io.BytesIO(image_bytes)) as img:
+        img.load()
+
+
 def validate_360_panorama(image_bytes: bytes, tolerance: float = 0.1) -> bool:
     """
     Validate if image is a 360 equirectangular panorama.
