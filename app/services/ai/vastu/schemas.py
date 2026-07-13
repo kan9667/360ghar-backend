@@ -106,6 +106,47 @@ def _coerce_count_value(v: object) -> int:
         return 0
 
 
+_STRING_LIST_DICT_KEYS = ("suggestion", "text", "improvement", "description", "message", "value")
+
+
+def _coerce_string_list_item(item: object) -> str | None:
+    """Coerce one list item to a non-empty string (LLMs often return objects)."""
+    if item is None:
+        return None
+    if isinstance(item, str):
+        text = item.strip()
+        return text or None
+    if isinstance(item, dict):
+        for key in _STRING_LIST_DICT_KEYS:
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        for value in item.values():
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+    text = str(item).strip()
+    return text or None
+
+
+def coerce_string_list(v: object) -> list[str]:
+    """Coerce LLM output to list[str] for fields like improvements / assumptions."""
+    if v is None:
+        return []
+    if isinstance(v, str):
+        text = v.strip()
+        return [text] if text else []
+    if not isinstance(v, list):
+        item = _coerce_string_list_item(v)
+        return [item] if item else []
+    result: list[str] = []
+    for item in v:
+        coerced = _coerce_string_list_item(item)
+        if coerced:
+            result.append(coerced)
+    return result
+
+
 class ToiletInfo(BaseModel):
     """Information about toilets/bathrooms."""
     count: int
@@ -204,6 +245,12 @@ class VastuAnalysisResult(BaseModel):
         default=True,
         description="Whether the image appears to be a valid floor plan"
     )
+
+    @field_validator("assumptions", "improvements", mode="before")
+    @classmethod
+    def _coerce_string_lists(cls, v: object) -> list[str]:
+        # LLMs frequently return objects like {"suggestion": "..."} instead of plain strings.
+        return coerce_string_list(v)
 
 
 class VastuAnalyzeResponse(BaseModel):

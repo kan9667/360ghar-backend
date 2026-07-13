@@ -384,6 +384,32 @@ class TestListUserProperties:
 
         assert len(rows) == len(test_properties)
 
+    @pytest.mark.asyncio
+    async def test_list_user_properties_retries_transient_db_error(self):
+        """A transient SSL/connection drop is retried once, not surfaced to the caller."""
+        from sqlalchemy.exc import DisconnectionError
+
+        from app.services.property import list_user_properties
+
+        db_session = AsyncMock(spec=AsyncSession)
+        db_session.rollback = AsyncMock()
+        db_session.invalidate = AsyncMock()
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        db_session.execute = AsyncMock(
+            side_effect=[DisconnectionError("consuming input failed: SSL error"), mock_result]
+        )
+
+        rows, next_payload, total = await list_user_properties(
+            db_session, owner_id=1, cursor_payload={}, limit=20
+        )
+
+        assert rows == []
+        assert next_payload is None
+        assert total is None
+        assert db_session.execute.call_count == 2
+
 
 class TestPropertyFiltering:
     """Tests for property filtering."""

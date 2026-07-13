@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential,
 )
@@ -61,12 +61,23 @@ async def _run_with_semaphore(coro):
             logger.warning("Unhandled exception in background AI task", exc_info=True)
 
 
+def _is_retryable_ai_provider_error(exc: BaseException) -> bool:
+    """Retry soft provider failures; skip hard quota (fail-over already handled)."""
+    if not isinstance(exc, AIProviderError):
+        return False
+    # Hard quota / cooldown errors set retryable=False so we fail over once
+    # instead of re-thrashing the exhausted provider.
+    if exc.retryable is False:
+        return False
+    return True
+
+
 def _create_retry_decorator():
     """Create a retry decorator for AI provider calls."""
     return retry(
         stop=stop_after_attempt(MAX_RETRIES),
         wait=wait_exponential(multiplier=1, min=MIN_WAIT_SECONDS, max=MAX_WAIT_SECONDS),
-        retry=retry_if_exception_type(AIProviderError),
+        retry=retry_if_exception(_is_retryable_ai_provider_error),
         before_sleep=before_sleep_log(logger, log_level=30),  # WARNING level
         reraise=True,
     )
@@ -252,10 +263,18 @@ async def _ensure_navigation_hotspots(
 async def _download_image_as_base64(url: str) -> tuple[str, str]:
     """Download an image and convert to base64."""
     from app.core.http import get_general_client
+    from app.services.image_processing import get_image_dimensions
 
     client = get_general_client()
     response = await client.get(url, timeout=60.0)
     response.raise_for_status()
+
+    # The content-type header alone is not reliable evidence of a decodable
+    # image (redirects, stale/corrupted stored files, transcoding failures).
+    try:
+        get_image_dimensions(response.content)
+    except Exception as exc:
+        raise ValueError(f"Downloaded image at {url} is not a valid image: {exc}") from exc
 
     content_type = response.headers.get("content-type", "image/jpeg")
     if ";" in content_type:

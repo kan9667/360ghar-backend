@@ -5,6 +5,8 @@ This module contains the comprehensive Vastu knowledge embedded in system prompt
 for the AI to use during floor plan analysis.
 """
 
+from app.services.ai.vastu.schemas import coerce_string_list
+
 # Combined single-invocation prompt for Vision LLM
 # This combines layout extraction + Vastu analysis in one prompt
 VASTU_VISION_SYSTEM_PROMPT = """You are an expert Vastu consultant with 15+ years of experience in traditional Vastu Shastra, combined with expertise in architectural floor plan analysis.
@@ -310,7 +312,8 @@ def generate_markdown_report(result: dict) -> str:
 
 """
 
-    # Improvements
+    # Improvements (coerce in case caller skipped normalize — LLMs may emit objects)
+    improvements = coerce_string_list(improvements)
     if improvements:
         report += "## 6. Layout Improvement Suggestions\n\n"
         for improvement in improvements:

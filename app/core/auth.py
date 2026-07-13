@@ -403,9 +403,16 @@ class SupabaseClientManager:
 
         if response.status_code != 200:
             if response.status_code in (401, 403):
+                error_code = None
+                try:
+                    error_code = response.json().get("error_code")
+                except Exception:  # noqa: BLE001
+                    pass
                 logger.info(
-                    "Supabase token verification failed (expected for expired tokens): status=%s body=%s",
+                    "Supabase token verification rejected (expired, revoked, or invalid signature): "
+                    "status=%s error_code=%s body=%s",
                     response.status_code,
+                    error_code,
                     response.text[:200],
                 )
             else:

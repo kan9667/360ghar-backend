@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.core.cache import PropertyCacheManager, get_cache_manager
+from app.core.db_resilience import execute_with_transient_retry
 from app.core.exceptions import (
     BadRequestException,
     InsufficientPermissionsError,
@@ -352,8 +353,10 @@ async def list_user_properties(
         .where(Property.owner_id == owner_id)
     )
     if with_total:
-        count_result = await db.execute(
-            select(func.count()).select_from(base_stmt.subquery())
+        count_result = await execute_with_transient_retry(
+            db,
+            lambda: db.execute(select(func.count()).select_from(base_stmt.subquery())),
+            operation_name="list_user_properties_count",
         )
         count_total = count_result.scalar_one()
 
@@ -370,7 +373,11 @@ async def list_user_properties(
         stmt = stmt.where(predicate)
     stmt = stmt.order_by(Property.created_at.desc(), Property.id.desc()).limit(limit + 1)
 
-    res = await db.execute(stmt)
+    res = await execute_with_transient_retry(
+        db,
+        lambda: db.execute(stmt),
+        operation_name="list_user_properties_query",
+    )
     properties = list(res.scalars().all())
     paused_count = 0
     for property_obj in properties:

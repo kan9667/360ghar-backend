@@ -10,7 +10,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from abc import ABC, abstractmethod
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
@@ -31,8 +33,158 @@ AI_MAX_RETRIES = 3
 AI_RETRY_MIN_WAIT = 2  # seconds
 AI_RETRY_MAX_WAIT = 8  # seconds
 
-# HTTP status codes that are transient and worth retrying
+# Delays at or above this are treated as hard quota windows: fail fast to
+# the next provider instead of burning short retries.
+_HARD_QUOTA_THRESHOLD_SECONDS = 60.0
+
+# HTTP status codes that are transient and worth retrying (when not hard-quota)
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+# Process-local cooldown after hard quota so concurrent requests skip the
+# exhausted provider instead of spamming logs for the rest of the window.
+_provider_cooldown_until: dict[str, float] = {}
+
+_RETRY_IN_SECONDS_RE = re.compile(
+    r"(?:please\s+)?retry\s+in\s+(\d+(?:\.\d+)?)\s*s",
+    re.IGNORECASE,
+)
+_RESET_AT_RE = re.compile(
+    r"(?:limit will )?reset at\s+(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})",
+    re.IGNORECASE,
+)
+_HOURS_WINDOW_RE = re.compile(
+    r"usage limit reached for\s+(\d+(?:\.\d+)?)\s*hour",
+    re.IGNORECASE,
+)
+
+
+def _parse_reset_at_delta_seconds(body: str) -> float | None:
+    """Best-effort seconds until a 'reset at YYYY-MM-DD HH:MM:SS' timestamp."""
+    reset_match = _RESET_AT_RE.search(body or "")
+    if not reset_match:
+        return None
+    stamp = reset_match.group(1).replace("T", " ")
+    try:
+        reset_dt = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    # Providers emit naive wall-clock (often their region local time). Use
+    # local now as a best-effort; prefer multi-hour window when both exist.
+    delta = (reset_dt - datetime.now()).total_seconds()
+    return delta if delta > 0 else None
+
+
+def _parse_hours_window_seconds(body: str) -> float | None:
+    """Parse 'Usage limit reached for N hour' into seconds."""
+    hours_match = _HOURS_WINDOW_RE.search(body or "")
+    if not hours_match:
+        return None
+    try:
+        return max(0.0, float(hours_match.group(1)) * 3600.0)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_retry_after_seconds(headers: httpx.Headers | dict[str, str], body: str) -> float | None:
+    """Extract a retry delay in seconds from headers and/or response body."""
+    raw_header = None
+    if hasattr(headers, "get"):
+        raw_header = headers.get("Retry-After") or headers.get("retry-after")
+    if raw_header:
+        try:
+            return max(0.0, float(raw_header))
+        except (TypeError, ValueError):
+            pass
+
+    match = _RETRY_IN_SECONDS_RE.search(body or "")
+    if match:
+        try:
+            return max(0.0, float(match.group(1)))
+        except (TypeError, ValueError):
+            pass
+
+    # Prefer multi-hour usage window over naive "reset at" timestamps (TZ-ambiguous).
+    # When both are present, take the shorter positive delay so we do not
+    # over-cool beyond the actual reset when the window is an upper bound.
+    hours_delay = _parse_hours_window_seconds(body)
+    reset_delay = _parse_reset_at_delta_seconds(body)
+    if hours_delay is not None and reset_delay is not None:
+        return min(hours_delay, reset_delay)
+    if hours_delay is not None:
+        return hours_delay
+    if reset_delay is not None:
+        return reset_delay
+
+    body_lower = (body or "").lower()
+    if _body_signals_quota_exhaustion(body_lower):
+        # Known long-window signals without a parseable duration.
+        if "hour" in body_lower or "free_tier" in body_lower or "resource_exhausted" in body_lower:
+            return _HARD_QUOTA_THRESHOLD_SECONDS
+
+    return None
+
+
+def _body_signals_quota_exhaustion(body_lower: str) -> bool:
+    """Match Gemini/GLM phrasing for quota / usage exhaustion."""
+    return (
+        "usage limit reached" in body_lower
+        or "quota exceeded" in body_lower
+        or "exceeded your current quota" in body_lower
+        or "resource_exhausted" in body_lower
+        or "free_tier" in body_lower
+    )
+
+
+def _is_hard_quota(status_code: int, retry_after: float | None, body: str) -> bool:
+    """True when the provider is in a long quota window — do not short-retry."""
+    if status_code != 429:
+        return False
+    if retry_after is not None and retry_after >= _HARD_QUOTA_THRESHOLD_SECONDS:
+        return True
+    body_lower = (body or "").lower()
+    if "usage limit reached" in body_lower:
+        return True
+    if _body_signals_quota_exhaustion(body_lower):
+        # Free-tier / RESOURCE_EXHAUSTED: fail over instead of thrashing short
+        # retries (Gemini often asks for 11–46s which exceeds our soft window).
+        return True
+    return False
+
+
+def _set_provider_cooldown(provider_name: str, retry_after: float | None) -> None:
+    """Record a process-local cooldown for an exhausted provider."""
+    seconds = retry_after if retry_after is not None else _HARD_QUOTA_THRESHOLD_SECONDS
+    # Cap cooldown bookkeeping so a bad parse cannot cool down for days.
+    seconds = min(max(seconds, _HARD_QUOTA_THRESHOLD_SECONDS), 6 * 3600.0)
+    _provider_cooldown_until[provider_name] = time.monotonic() + seconds
+    logger.warning(
+        "AI provider '%s' entering cooldown for %.0fs after hard quota",
+        provider_name,
+        seconds,
+    )
+
+
+def _check_provider_cooldown(provider_name: str) -> None:
+    """Raise immediately if this provider is still in hard-quota cooldown."""
+    until = _provider_cooldown_until.get(provider_name)
+    if until is None:
+        return
+    remaining = until - time.monotonic()
+    if remaining <= 0:
+        _provider_cooldown_until.pop(provider_name, None)
+        return
+    raise AIProviderError(
+        message=f"Provider in hard-quota cooldown; retry after {remaining:.0f}s",
+        provider=provider_name,
+        status_code=429,
+        retryable=False,
+        retry_after_seconds=remaining,
+    )
+
+
+def clear_provider_cooldowns() -> None:
+    """Clear process-local cooldowns (for tests)."""
+    _provider_cooldown_until.clear()
 
 
 def _is_retryable_error(exc: BaseException) -> bool:
@@ -41,8 +193,11 @@ def _is_retryable_error(exc: BaseException) -> bool:
     # SendError, ReceiveError, PoolTimeout, etc.) are transient
     if isinstance(exc, httpx.RequestError):
         return True
-    if isinstance(exc, AIProviderError) and exc.status_code in _RETRYABLE_STATUS_CODES:
-        return True
+    if isinstance(exc, AIProviderError):
+        if exc.retryable is False:
+            return False
+        if exc.status_code in _RETRYABLE_STATUS_CODES:
+            return True
     return False
 
 
@@ -128,13 +283,19 @@ class AIProvider(ABC):
 
         Uses tenacity with exponential backoff. Retries on:
         - Network errors (timeout, connect, send, receive)
-        - HTTP 429 (rate limit), 500, 502, 503, 504
+        - HTTP 500, 502, 503, 504
+        - Short-lived HTTP 429 (rate spikes within the retry window)
 
-        Does NOT retry on auth errors (401, 403) or client errors (400).
+        Does NOT retry on:
+        - Auth errors (401, 403) or client errors (400)
+        - Hard quota 429s (multi-hour usage limits / free-tier exhaustion)
+          so callers can fail over to another provider immediately
 
         All exceptions are normalised to ``AIProviderError`` before
         propagating so callers only need to handle that single type.
         """
+        _check_provider_cooldown(self.name)
+
         @retry(
             stop=stop_after_attempt(AI_MAX_RETRIES),
             wait=wait_exponential(
@@ -150,11 +311,26 @@ class AIProvider(ABC):
             response = await client.post(url, headers=headers, json=payload)
 
             if response.status_code in _RETRYABLE_STATUS_CODES:
+                body = response.text[:1000]
+                retry_after = _parse_retry_after_seconds(response.headers, body)
+                hard = _is_hard_quota(response.status_code, retry_after, body)
+                if hard:
+                    _set_provider_cooldown(self.name, retry_after)
+                    raise AIProviderError(
+                        message=f"Hard quota HTTP {response.status_code}: {body[:500]}",
+                        provider=self.name,
+                        status_code=response.status_code,
+                        response_body=body,
+                        retryable=False,
+                        retry_after_seconds=retry_after,
+                    )
                 raise AIProviderError(
-                    message=f"Retryable HTTP {response.status_code}: {response.text[:500]}",
+                    message=f"Retryable HTTP {response.status_code}: {body[:500]}",
                     provider=self.name,
                     status_code=response.status_code,
-                    response_body=response.text[:1000],
+                    response_body=body,
+                    retryable=True,
+                    retry_after_seconds=retry_after,
                 )
 
             if response.status_code >= 400:
@@ -163,12 +339,15 @@ class AIProvider(ABC):
                     provider=self.name,
                     status_code=response.status_code,
                     response_body=response.text[:1000],
+                    retryable=False,
                 )
 
             return response
 
         try:
             return await _do_post()
+        except AIProviderError:
+            raise
         except httpx.TimeoutException as exc:
             raise AIProviderError(
                 message=f"Request timed out after {AI_MAX_RETRIES} attempts: {exc}",
@@ -320,11 +499,16 @@ class AIProviderError(Exception):
         provider: str,
         status_code: int | None = None,
         response_body: str | None = None,
+        retryable: bool | None = None,
+        retry_after_seconds: float | None = None,
     ):
         super().__init__(message)
         self.provider = provider
         self.status_code = status_code
         self.response_body = response_body
+        # None = infer from status_code for backward compatibility
+        self.retryable = retryable
+        self.retry_after_seconds = retry_after_seconds
 
     def __str__(self) -> str:
         base = f"[{self.provider}] {super().__str__()}"

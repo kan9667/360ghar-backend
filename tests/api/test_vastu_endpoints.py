@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
+from PIL import Image
 
 from app.core.utils import utc_now_iso
 from app.services.ai.vastu import (
@@ -17,6 +18,13 @@ from app.services.ai.vastu import (
     VastuAnalyzeResponse,
 )
 from app.services.ai.vastu.schemas import FloorPlanAnalysis
+
+
+def make_test_image_bytes(fmt: str = "PNG") -> bytes:
+    """Build a real decodable image so the endpoint's format-validation passes."""
+    buf = BytesIO()
+    Image.new("RGB", (4, 4), color=(200, 100, 50)).save(buf, format=fmt)
+    return buf.getvalue()
 
 
 def create_mock_vastu_response(
@@ -89,7 +97,7 @@ class TestVastuAnalyzeEndpoint:
             mock_analyze.return_value = create_mock_vastu_response(success=True, vastu_score=7)
 
             # Create test image data
-            image_content = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+            image_content = make_test_image_bytes("PNG")
             files = {"image": ("floor_plan.png", BytesIO(image_content), "image/png")}
             data = {
                 "north_direction": "up",
@@ -135,6 +143,21 @@ class TestVastuAnalyzeEndpoint:
         )
 
         assert response.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_analyze_corrupted_image_content(self, client: AsyncClient):
+        """A file with an allowed content-type but undecodable bytes is rejected."""
+        files = {"image": ("floor_plan.png", BytesIO(b"not actually a png" * 10), "image/png")}
+        data = {"north_direction": "up"}
+
+        response = await client.post(
+            "/api/v1/vastu/analyze",
+            files=files,
+            data=data,
+        )
+
+        assert response.status_code == 400
+        assert "Invalid or corrupted image" in response.json()["error"]["message"]
 
     @pytest.mark.asyncio
     async def test_analyze_invalid_north_direction(self, client: AsyncClient):
@@ -196,7 +219,7 @@ class TestVastuAnalyzeEndpoint:
         ) as mock_analyze:
             mock_analyze.return_value = create_mock_vastu_response(success=True, vastu_score=8)
 
-            image_content = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+            image_content = make_test_image_bytes("PNG")
 
             for direction in ["up", "down", "left", "right", "unknown"]:
                 files = {"image": ("floor_plan.png", BytesIO(image_content), "image/png")}
@@ -219,8 +242,7 @@ class TestVastuAnalyzeEndpoint:
         ) as mock_analyze:
             mock_analyze.return_value = create_mock_vastu_response(success=True, vastu_score=6)
 
-            # JPEG header
-            image_content = b"\xff\xd8\xff\xe0" + b"\x00" * 100
+            image_content = make_test_image_bytes("JPEG")
             files = {"image": ("floor_plan.jpg", BytesIO(image_content), "image/jpeg")}
             data = {"north_direction": "up"}
 
@@ -241,7 +263,7 @@ class TestVastuAnalyzeEndpoint:
         ) as mock_analyze:
             mock_analyze.return_value = create_mock_vastu_response(success=True, vastu_score=7)
 
-            image_content = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+            image_content = make_test_image_bytes("PNG")
             files = {"image": ("floor_plan.png", BytesIO(image_content), "image/png")}
             data = {
                 "north_direction": "up",

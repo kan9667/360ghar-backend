@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
+from io import BytesIO
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from tenacity import stop_after_attempt, wait_none
@@ -57,6 +59,42 @@ def _fast_retry():
     finally:
         fn.retry.stop = original_stop
         fn.retry.wait = original_wait
+
+
+def _fake_download_client(response_content: bytes, content_type: str = "image/jpeg") -> MagicMock:
+    fake_response = MagicMock()
+    fake_response.raise_for_status = MagicMock()
+    fake_response.content = response_content
+    fake_response.headers = {"content-type": content_type}
+    fake_client = MagicMock()
+    fake_client.get = AsyncMock(return_value=fake_response)
+    return fake_client
+
+
+@pytest.mark.asyncio
+async def test_download_image_as_base64_rejects_undecodable_bytes():
+    fake_client = _fake_download_client(b"not an image")
+    with patch("app.core.http.get_general_client", return_value=fake_client):
+        with pytest.raises(ValueError, match="not a valid image"):
+            await tour_ai_helpers._download_image_as_base64("https://example.com/scene.jpg")
+
+
+@pytest.mark.asyncio
+async def test_download_image_as_base64_accepts_real_image():
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.new("RGB", (4, 4)).save(buf, format="JPEG")
+    real_bytes = buf.getvalue()
+
+    fake_client = _fake_download_client(real_bytes)
+    with patch("app.core.http.get_general_client", return_value=fake_client):
+        image_base64, content_type = await tour_ai_helpers._download_image_as_base64(
+            "https://example.com/scene.jpg"
+        )
+
+    assert content_type == "image/jpeg"
+    assert base64.b64decode(image_base64) == real_bytes
 
 
 def test_resolve_fallback_provider_picks_glm_for_gemini_primary():
@@ -123,3 +161,44 @@ async def test_complete_json_with_retry_propagates_fallback_error_when_fallback_
     with patch("app.services.tour_ai.helpers.get_ai_provider", return_value=fallback):
         with pytest.raises(AIProviderError, match="fallback boom"):
             await tour_ai_helpers._complete_json_with_retry(primary, messages=[])
+
+
+async def test_complete_json_with_retry_does_not_outer_retry_hard_quota():
+    """Hard-quota errors must fail over once, not thrash outer tenacity."""
+    primary = _FakeProvider(
+        "Gemini",
+        complete_json_exc=AIProviderError(
+            "hard",
+            provider="Gemini",
+            status_code=429,
+            retryable=False,
+        ),
+    )
+    fallback = _FakeProvider(
+        "GLM",
+        complete_json_exc=AIProviderError(
+            "also hard",
+            provider="GLM",
+            status_code=429,
+            retryable=False,
+        ),
+    )
+    # Restore multi-attempt stop for this test; wait stays zero.
+    fn = tour_ai_helpers._complete_json_with_retry
+    fn.retry.stop = stop_after_attempt(3)
+
+    call_count = {"n": 0}
+    original = primary.complete_json
+
+    async def counting_complete_json(*args, **kwargs):
+        call_count["n"] += 1
+        return await original(*args, **kwargs)
+
+    primary.complete_json = counting_complete_json  # type: ignore[method-assign]
+
+    with patch("app.services.tour_ai.helpers.get_ai_provider", return_value=fallback):
+        with pytest.raises(AIProviderError, match="also hard"):
+            await tour_ai_helpers._complete_json_with_retry(primary, messages=[])
+
+    # Outer retry must not re-invoke primary for non-retryable errors.
+    assert call_count["n"] == 1

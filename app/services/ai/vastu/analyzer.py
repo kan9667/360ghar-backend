@@ -12,6 +12,8 @@ Robustness features:
 
 from __future__ import annotations
 
+from pydantic import ValidationError
+
 from app.core.constants import (
     DEFAULT_VISION_PROVIDER,
     VALID_VISION_PROVIDERS,
@@ -51,6 +53,7 @@ from app.services.ai.vastu.schemas import (
     VastuDefect,
     VastuRemedy,
     VastuStatus,
+    coerce_string_list,
 )
 
 logger = get_logger(__name__)
@@ -204,7 +207,21 @@ async def analyze_vastu(
     # --- Build success response ---
     provider_used_label = result_json.pop("_provider_used", primary_name)
 
-    analysis_result = _parse_analysis_result(result_json)
+    # Normalize string-list fields so markdown + pydantic both see list[str]
+    result_json["improvements"] = coerce_string_list(result_json.get("improvements"))
+    result_json["assumptions"] = coerce_string_list(result_json.get("assumptions"))
+
+    try:
+        analysis_result = _parse_analysis_result(result_json)
+    except ValidationError as exc:
+        logger.error("Vastu result schema validation failed: %s", exc)
+        return VastuAnalyzeResponse(
+            success=False,
+            error="Analysis returned an unexpected format. Please try again.",
+            provider_used=provider_used_label,
+            analyzed_at=analyzed_at,
+        )
+
     report_markdown = generate_markdown_report(result_json)
 
     has_warnings = len(analysis_result.warnings) > 0
